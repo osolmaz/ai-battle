@@ -1,3 +1,5 @@
+import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -35,10 +37,12 @@ type AnswerResponse = {
   artifactPaths?: string[];
 };
 
-type JudgeOutcome = "answerer_point" | "asker_point" | "flawed_caught" | "flawed_missed";
+type JudgedOutcome = "answerer_point" | "asker_point" | "flawed_caught" | "flawed_missed";
+type AutomaticOutcome = "asker_forfeit" | "answerer_forfeit";
+type TurnOutcome = JudgedOutcome | AutomaticOutcome;
 
 type JudgeResponse = {
-  outcome: JudgeOutcome;
+  outcome: JudgedOutcome;
   reason: string;
 };
 
@@ -54,7 +58,7 @@ type RulingSummary = {
   answererRole: MatchRole;
   askerName: string;
   answererName: string;
-  outcome: JudgeOutcome;
+  outcome: TurnOutcome;
   reason: string;
   askerDelta: number;
   answererDelta: number;
@@ -72,7 +76,7 @@ type TurnRecord = {
   judgeNotePath: string;
   answerPath: string;
   rulingPath: string;
-  outcome: JudgeOutcome;
+  outcome: TurnOutcome;
   reason: string;
   askerDelta: number;
   answererDelta: number;
@@ -94,6 +98,10 @@ type MatchState = {
   participantAName: string;
   participantBName: string;
   judgeName: string;
+  participantAAgentCommand: string;
+  participantBAgentCommand: string;
+  participantASessionName: string;
+  participantBSessionName: string;
   participantAFileStem: string;
   participantBFileStem: string;
   judgeFileStem: string;
@@ -162,7 +170,7 @@ type WrittenRuling = {
   answererRole: MatchRole;
   askerName: string;
   answererName: string;
-  outcome: JudgeOutcome;
+  outcome: TurnOutcome;
   reason: string;
   askerDelta: number;
   answererDelta: number;
@@ -172,17 +180,49 @@ type WrittenRuling = {
   answerPath: string;
 };
 
-const PARTICIPANT_A_SESSION = {
-  handle: "participant-a",
+type AskTurnActionResult =
+  | {
+      route: "wait_participant_a" | "wait_participant_b";
+      askResponse: AskResponse;
+    }
+  | {
+      route: "write_ask_forfeit_turn";
+      reason: string;
+    };
+
+type AnswerTurnActionResult =
+  | {
+      route: "write_answer";
+      answerResponse: AnswerResponse;
+    }
+  | {
+      route: "write_answer_forfeit_turn";
+      reason: string;
+    };
+
+type ParticipantPromptSuccess<T> = {
+  ok: true;
+  value: T;
 };
 
-const PARTICIPANT_B_SESSION = {
-  handle: "participant-b",
+type ParticipantPromptFailure = {
+  ok: false;
+  reason: string;
 };
+
+type ParticipantPromptResult<T> = ParticipantPromptSuccess<T> | ParticipantPromptFailure;
 
 const JUDGE_SESSION = {
   handle: "judge",
 };
+
+const PARTICIPANT_TURN_TIMEOUT_MS = 30 * 60_000;
+const PARTICIPANT_GRACE_TIMEOUT_MS = 60_000;
+const BRIEFING_TIMEOUT_MS = 20 * 60_000;
+const JUDGE_TIMEOUT_MS = 20 * 60_000;
+const SHORT_ACK_TIMEOUT_MS = 10 * 60_000;
+const PARTICIPANT_ACTION_TIMEOUT_MS =
+  PARTICIPANT_TURN_TIMEOUT_MS + PARTICIPANT_GRACE_TIMEOUT_MS + 120_000;
 
 export default defineFlow({
   name: "ai-battle",
@@ -203,29 +243,41 @@ export default defineFlow({
       run: ({ outputs }) => outputs.prepare_match,
     }),
 
-    brief_participant_a: acp({
-      profile: "participant-a",
-      session: PARTICIPANT_A_SESSION,
-      cwd: ({ outputs }) => prepared(outputs).participantAWorkspaceDir,
-      timeoutMs: 20 * 60_000,
+    brief_participant_a: action({
+      timeoutMs: BRIEFING_TIMEOUT_MS,
       statusDetail: "Send the rules to participant A",
-      async prompt({ outputs }) {
-        return participantBriefingPrompt(prepared(outputs), {
-          role: "participant_a",
-        });
+      run: async ({ outputs }) => {
+        const state = prepared(outputs);
+        await sendParticipantInformationalPrompt(
+          state,
+          "participant_a",
+          participantBriefingPrompt(state, {
+            role: "participant_a",
+          }),
+          BRIEFING_TIMEOUT_MS,
+        );
+        return {
+          acknowledged: true,
+        };
       },
     }),
 
-    brief_participant_b: acp({
-      profile: "participant-b",
-      session: PARTICIPANT_B_SESSION,
-      cwd: ({ outputs }) => prepared(outputs).participantBWorkspaceDir,
-      timeoutMs: 20 * 60_000,
+    brief_participant_b: action({
+      timeoutMs: BRIEFING_TIMEOUT_MS,
       statusDetail: "Send the rules to participant B",
-      async prompt({ outputs }) {
-        return participantBriefingPrompt(prepared(outputs), {
-          role: "participant_b",
-        });
+      run: async ({ outputs }) => {
+        const state = prepared(outputs);
+        await sendParticipantInformationalPrompt(
+          state,
+          "participant_b",
+          participantBriefingPrompt(state, {
+            role: "participant_b",
+          }),
+          BRIEFING_TIMEOUT_MS,
+        );
+        return {
+          acknowledged: true,
+        };
       },
     }),
 
@@ -233,7 +285,7 @@ export default defineFlow({
       profile: "judge",
       session: JUDGE_SESSION,
       cwd: ({ outputs }) => prepared(outputs).judgeWorkspaceDir,
-      timeoutMs: 20 * 60_000,
+      timeoutMs: BRIEFING_TIMEOUT_MS,
       statusDetail: "Send the rules and judging rubric to the judge",
       async prompt({ outputs }) {
         return judgeBriefingPrompt(prepared(outputs));
@@ -244,49 +296,49 @@ export default defineFlow({
       run: ({ outputs }) => chooseTurn(currentState(outputs)),
     }),
 
-    ask_participant_a: acp({
-      profile: "participant-a",
-      session: PARTICIPANT_A_SESSION,
-      cwd: ({ outputs }) => currentTurn(outputs).state.participantAWorkspaceDir,
-      timeoutMs: 20 * 60_000,
+    ask_participant_a: action({
+      timeoutMs: PARTICIPANT_ACTION_TIMEOUT_MS,
       statusDetail: "Ask participant A for the next question",
-      async prompt({ outputs }) {
-        return askPrompt(currentTurn(outputs));
-      },
-      parse: (text) => extractJsonObject(text),
+      run: async ({ outputs }) => await runAskTurn(currentTurn(outputs), "participant_a"),
     }),
 
-    ask_participant_b: acp({
-      profile: "participant-b",
-      session: PARTICIPANT_B_SESSION,
-      cwd: ({ outputs }) => currentTurn(outputs).state.participantBWorkspaceDir,
-      timeoutMs: 20 * 60_000,
+    ask_participant_b: action({
+      timeoutMs: PARTICIPANT_ACTION_TIMEOUT_MS,
       statusDetail: "Ask participant B for the next question",
-      async prompt({ outputs }) {
-        return askPrompt(currentTurn(outputs));
-      },
-      parse: (text) => extractJsonObject(text),
+      run: async ({ outputs }) => await runAskTurn(currentTurn(outputs), "participant_b"),
     }),
 
-    wait_participant_a: acp({
-      profile: "participant-a",
-      session: PARTICIPANT_A_SESSION,
-      cwd: ({ outputs }) => currentTurn(outputs).state.participantAWorkspaceDir,
-      timeoutMs: 10 * 60_000,
+    wait_participant_a: action({
+      timeoutMs: SHORT_ACK_TIMEOUT_MS,
       statusDetail: "Tell participant A to wait for the current turn",
-      async prompt({ outputs }) {
-        return waitPrompt(currentTurn(outputs), "participant_a");
+      run: async ({ outputs }) => {
+        const selection = currentTurn(outputs);
+        await sendParticipantInformationalPrompt(
+          selection.state,
+          "participant_a",
+          waitPrompt(selection, "participant_a"),
+          SHORT_ACK_TIMEOUT_MS,
+        );
+        return {
+          acknowledged: true,
+        };
       },
     }),
 
-    wait_participant_b: acp({
-      profile: "participant-b",
-      session: PARTICIPANT_B_SESSION,
-      cwd: ({ outputs }) => currentTurn(outputs).state.participantBWorkspaceDir,
-      timeoutMs: 10 * 60_000,
+    wait_participant_b: action({
+      timeoutMs: SHORT_ACK_TIMEOUT_MS,
       statusDetail: "Tell participant B to wait for the current turn",
-      async prompt({ outputs }) {
-        return waitPrompt(currentTurn(outputs), "participant_b");
+      run: async ({ outputs }) => {
+        const selection = currentTurn(outputs);
+        await sendParticipantInformationalPrompt(
+          selection.state,
+          "participant_b",
+          waitPrompt(selection, "participant_b"),
+          SHORT_ACK_TIMEOUT_MS,
+        );
+        return {
+          acknowledged: true,
+        };
       },
     }),
 
@@ -295,28 +347,16 @@ export default defineFlow({
       run: async ({ outputs }) => await writeQuestion(currentTurn(outputs), outputs),
     }),
 
-    answer_participant_a: acp({
-      profile: "participant-a",
-      session: PARTICIPANT_A_SESSION,
-      cwd: ({ outputs }) => writtenQuestion(outputs).state.participantAWorkspaceDir,
-      timeoutMs: 20 * 60_000,
+    answer_participant_a: action({
+      timeoutMs: PARTICIPANT_ACTION_TIMEOUT_MS,
       statusDetail: "Ask participant A to answer the current question",
-      async prompt({ outputs }) {
-        return answerPrompt(writtenQuestion(outputs));
-      },
-      parse: (text) => extractJsonObject(text),
+      run: async ({ outputs }) => await runAnswerTurn(writtenQuestion(outputs), "participant_a"),
     }),
 
-    answer_participant_b: acp({
-      profile: "participant-b",
-      session: PARTICIPANT_B_SESSION,
-      cwd: ({ outputs }) => writtenQuestion(outputs).state.participantBWorkspaceDir,
-      timeoutMs: 20 * 60_000,
+    answer_participant_b: action({
+      timeoutMs: PARTICIPANT_ACTION_TIMEOUT_MS,
       statusDetail: "Ask participant B to answer the current question",
-      async prompt({ outputs }) {
-        return answerPrompt(writtenQuestion(outputs));
-      },
-      parse: (text) => extractJsonObject(text),
+      run: async ({ outputs }) => await runAnswerTurn(writtenQuestion(outputs), "participant_b"),
     }),
 
     write_answer: action({
@@ -324,11 +364,21 @@ export default defineFlow({
       run: async ({ outputs }) => await writeAnswer(writtenQuestion(outputs), outputs),
     }),
 
+    write_ask_forfeit_turn: action({
+      statusDetail: "Write the automatic ruling for a missed ask turn",
+      run: async ({ outputs }) => await writeAskForfeitTurn(currentTurn(outputs), outputs),
+    }),
+
+    write_answer_forfeit_turn: action({
+      statusDetail: "Write the automatic ruling for a missed answer turn",
+      run: async ({ outputs }) => await writeAnswerForfeitTurn(writtenQuestion(outputs), outputs),
+    }),
+
     judge_turn: acp({
       profile: "judge",
       session: JUDGE_SESSION,
       cwd: ({ outputs }) => writtenAnswer(outputs).state.judgeWorkspaceDir,
-      timeoutMs: 20 * 60_000,
+      timeoutMs: JUDGE_TIMEOUT_MS,
       statusDetail: "Ask the judge to rule on the completed turn",
       async prompt({ outputs }) {
         return judgePrompt(writtenAnswer(outputs));
@@ -341,25 +391,41 @@ export default defineFlow({
       run: async ({ outputs }) => await writeRuling(writtenAnswer(outputs), outputs.judge_turn),
     }),
 
-    notify_participant_a: acp({
-      profile: "participant-a",
-      session: PARTICIPANT_A_SESSION,
-      cwd: ({ outputs }) => writtenRuling(outputs).state.participantAWorkspaceDir,
-      timeoutMs: 10 * 60_000,
+    select_ruling: compute({
+      run: ({ outputs }) => selectWrittenRuling(outputs),
+    }),
+
+    notify_participant_a: action({
+      timeoutMs: SHORT_ACK_TIMEOUT_MS,
       statusDetail: "Send the official ruling to participant A",
-      async prompt({ outputs }) {
-        return rulingNotificationPrompt(writtenRuling(outputs), "participant_a");
+      run: async ({ outputs }) => {
+        const ruling = writtenRuling(outputs);
+        await sendParticipantInformationalPrompt(
+          ruling.state,
+          "participant_a",
+          rulingNotificationPrompt(ruling, "participant_a"),
+          SHORT_ACK_TIMEOUT_MS,
+        );
+        return {
+          acknowledged: true,
+        };
       },
     }),
 
-    notify_participant_b: acp({
-      profile: "participant-b",
-      session: PARTICIPANT_B_SESSION,
-      cwd: ({ outputs }) => writtenRuling(outputs).state.participantBWorkspaceDir,
-      timeoutMs: 10 * 60_000,
+    notify_participant_b: action({
+      timeoutMs: SHORT_ACK_TIMEOUT_MS,
       statusDetail: "Send the official ruling to participant B",
-      async prompt({ outputs }) {
-        return rulingNotificationPrompt(writtenRuling(outputs), "participant_b");
+      run: async ({ outputs }) => {
+        const ruling = writtenRuling(outputs);
+        await sendParticipantInformationalPrompt(
+          ruling.state,
+          "participant_b",
+          rulingNotificationPrompt(ruling, "participant_b"),
+          SHORT_ACK_TIMEOUT_MS,
+        );
+        return {
+          acknowledged: true,
+        };
       },
     }),
 
@@ -400,8 +466,26 @@ export default defineFlow({
         },
       },
     },
-    { from: "ask_participant_a", to: "wait_participant_b" },
-    { from: "ask_participant_b", to: "wait_participant_a" },
+    {
+      from: "ask_participant_a",
+      switch: {
+        on: "$.route",
+        cases: {
+          wait_participant_b: "wait_participant_b",
+          write_ask_forfeit_turn: "write_ask_forfeit_turn",
+        },
+      },
+    },
+    {
+      from: "ask_participant_b",
+      switch: {
+        on: "$.route",
+        cases: {
+          wait_participant_a: "wait_participant_a",
+          write_ask_forfeit_turn: "write_ask_forfeit_turn",
+        },
+      },
+    },
     { from: "wait_participant_a", to: "write_question" },
     { from: "wait_participant_b", to: "write_question" },
     {
@@ -414,11 +498,32 @@ export default defineFlow({
         },
       },
     },
-    { from: "answer_participant_a", to: "write_answer" },
-    { from: "answer_participant_b", to: "write_answer" },
+    {
+      from: "answer_participant_a",
+      switch: {
+        on: "$.route",
+        cases: {
+          write_answer: "write_answer",
+          write_answer_forfeit_turn: "write_answer_forfeit_turn",
+        },
+      },
+    },
+    {
+      from: "answer_participant_b",
+      switch: {
+        on: "$.route",
+        cases: {
+          write_answer: "write_answer",
+          write_answer_forfeit_turn: "write_answer_forfeit_turn",
+        },
+      },
+    },
     { from: "write_answer", to: "judge_turn" },
     { from: "judge_turn", to: "write_ruling" },
-    { from: "write_ruling", to: "notify_participant_a" },
+    { from: "write_ruling", to: "select_ruling" },
+    { from: "write_ask_forfeit_turn", to: "select_ruling" },
+    { from: "write_answer_forfeit_turn", to: "select_ruling" },
+    { from: "select_ruling", to: "notify_participant_a" },
     { from: "notify_participant_a", to: "notify_participant_b" },
     { from: "notify_participant_b", to: "advance_turn" },
     { from: "advance_turn", to: "choose_turn" },
@@ -451,12 +556,48 @@ function writtenAnswer(outputs: Record<string, unknown>): WrittenAnswer {
 }
 
 function writtenRuling(outputs: Record<string, unknown>): WrittenRuling {
-  return outputs.write_ruling as WrittenRuling;
+  return outputs.select_ruling as WrittenRuling;
+}
+
+function askActionResult(raw: unknown): AskTurnActionResult {
+  return raw as AskTurnActionResult;
+}
+
+function answerActionResult(raw: unknown): AnswerTurnActionResult {
+  return raw as AnswerTurnActionResult;
+}
+
+function askResponseFromActionResult(raw: unknown): AskResponse {
+  const result = askActionResult(raw);
+  if (result.route === "write_ask_forfeit_turn") {
+    throw new Error("Expected a valid ask response but received an automatic ask forfeit.");
+  }
+  return result.askResponse;
+}
+
+function answerResponseFromActionResult(raw: unknown): AnswerResponse {
+  const result = answerActionResult(raw);
+  if (result.route === "write_answer_forfeit_turn") {
+    throw new Error("Expected a valid answer response but received an automatic answer forfeit.");
+  }
+  return result.answerResponse;
+}
+
+function selectWrittenRuling(outputs: Record<string, unknown>): WrittenRuling {
+  return (
+    (outputs.write_ruling as WrittenRuling | undefined) ??
+    (outputs.write_ask_forfeit_turn as WrittenRuling | undefined) ??
+    (outputs.write_answer_forfeit_turn as WrittenRuling | undefined) ??
+    (() => {
+      throw new Error("No ruling output was produced for the current turn.");
+    })()
+  );
 }
 
 async function prepareMatch(input: AiBattleInput): Promise<PreparedMatch> {
   const battleRepo = path.resolve(input.battleRepo ?? process.cwd());
   const scratchRoot = resolveScratchRoot(input.scratchRoot);
+  const agentCommands = await loadParticipantAgentCommands(battleRepo);
   const participantAName = input.participantAName?.trim() || "participant-a";
   const participantBName = input.participantBName?.trim() || "participant-b";
   const judgeName = input.judgeName?.trim() || "judge";
@@ -475,13 +616,19 @@ async function prepareMatch(input: AiBattleInput): Promise<PreparedMatch> {
   const suddenDeathTurns = suddenDeathQuestionCount * 2;
   const startingParticipant = normalizeStartingParticipant(input.startingParticipant);
   const sessionsDir = path.join(battleRepo, "sessions");
-  const matchId = await createUniqueMatchId(sessionsDir, participantAFileStem, participantBFileStem);
+  const matchId = await createUniqueMatchId(
+    sessionsDir,
+    participantAFileStem,
+    participantBFileStem,
+  );
   const matchDir = path.join(sessionsDir, matchId);
   const manifestPath = path.join(matchDir, "manifest.md");
   const scratchMatchDir = path.join(scratchRoot, matchId);
   const participantAWorkspaceDir = path.join(scratchMatchDir, "participant-a");
   const participantBWorkspaceDir = path.join(scratchMatchDir, "participant-b");
   const judgeWorkspaceDir = path.join(scratchMatchDir, "judge");
+  const participantASessionName = `${matchId}-participant-a`;
+  const participantBSessionName = `${matchId}-participant-b`;
 
   await fs.mkdir(matchDir, { recursive: true });
   await fs.mkdir(participantAWorkspaceDir, { recursive: true });
@@ -504,6 +651,10 @@ async function prepareMatch(input: AiBattleInput): Promise<PreparedMatch> {
     participantAName,
     participantBName,
     judgeName,
+    participantAAgentCommand: agentCommands.participantAAgentCommand,
+    participantBAgentCommand: agentCommands.participantBAgentCommand,
+    participantASessionName,
+    participantBSessionName,
     participantAFileStem,
     participantBFileStem,
     judgeFileStem,
@@ -621,6 +772,474 @@ function chooseTurn(state: MatchState): TurnSelection {
   };
 }
 
+async function loadParticipantAgentCommands(battleRepo: string): Promise<{
+  participantAAgentCommand: string;
+  participantBAgentCommand: string;
+}> {
+  const configPath = path.join(battleRepo, ".acpxrc.json");
+  let rawConfig: string;
+  try {
+    rawConfig = await fs.readFile(configPath, "utf8");
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") {
+      throw new Error(`Missing .acpxrc.json in battle repo: ${configPath}`);
+    }
+    throw error;
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(rawConfig);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new Error(`Invalid JSON in ${configPath}: ${reason}`);
+  }
+
+  const agents = asObject(parsed)?.agents;
+  const participantAAgentCommand = readAgentCommandFromConfig(agents, "participant-a", configPath);
+  const participantBAgentCommand = readAgentCommandFromConfig(agents, "participant-b", configPath);
+  return {
+    participantAAgentCommand,
+    participantBAgentCommand,
+  };
+}
+
+async function runAskTurn(
+  selection: TurnSelection,
+  expectedRole: MatchRole,
+): Promise<AskTurnActionResult> {
+  if (selection.askerRole !== expectedRole) {
+    throw new Error(`Expected ${expectedRole} to ask on turn ${selection.state.currentTurn}.`);
+  }
+
+  const result = await sendParticipantStructuredPrompt(
+    selection.state,
+    selection.askerRole,
+    askPrompt(selection),
+    askGracePrompt(selection),
+    normalizeAskResponse,
+    "question",
+  );
+
+  if (result.ok) {
+    return {
+      route:
+        selection.answererRole === "participant_a" ? "wait_participant_a" : "wait_participant_b",
+      askResponse: result.value,
+    };
+  }
+
+  return {
+    route: "write_ask_forfeit_turn",
+    reason: result.reason,
+  };
+}
+
+async function runAnswerTurn(
+  turn: WrittenQuestion,
+  expectedRole: MatchRole,
+): Promise<AnswerTurnActionResult> {
+  if (turn.answererRole !== expectedRole) {
+    throw new Error(`Expected ${expectedRole} to answer on turn ${turn.state.currentTurn}.`);
+  }
+
+  const result = await sendParticipantStructuredPrompt(
+    turn.state,
+    turn.answererRole,
+    answerPrompt(turn),
+    answerGracePrompt(turn),
+    normalizeAnswerResponse,
+    "answer",
+  );
+
+  if (result.ok) {
+    return {
+      route: "write_answer",
+      answerResponse: result.value,
+    };
+  }
+
+  return {
+    route: "write_answer_forfeit_turn",
+    reason: result.reason,
+  };
+}
+
+async function sendParticipantInformationalPrompt(
+  state: MatchState,
+  role: MatchRole,
+  prompt: string,
+  timeoutMs: number,
+): Promise<void> {
+  const command = participantAgentCommandForRole(state, role);
+  const workspaceDir = participantWorkspaceDirForRole(state, role);
+  const sessionName = participantSessionNameForRole(state, role);
+
+  await ensureParticipantSession(command, workspaceDir, sessionName);
+  const result = await runParticipantPromptCommand({
+    agentCommand: command,
+    workspaceDir,
+    sessionName,
+    prompt,
+    timeoutMs,
+  });
+
+  if (result.exitCode === 0) {
+    return;
+  }
+  if (isTimeoutCliResult(result)) {
+    await cancelParticipantPrompt(command, workspaceDir, sessionName);
+    return;
+  }
+
+  throw new Error(
+    `Participant prompt failed for ${nameForRole(state, role)}: ${describeCliFailure(result)}`,
+  );
+}
+
+async function sendParticipantStructuredPrompt<T>(
+  state: MatchState,
+  role: MatchRole,
+  prompt: string,
+  gracePrompt: string,
+  normalize: (raw: unknown) => T,
+  kindLabel: "question" | "answer",
+): Promise<ParticipantPromptResult<T>> {
+  const command = participantAgentCommandForRole(state, role);
+  const workspaceDir = participantWorkspaceDirForRole(state, role);
+  const sessionName = participantSessionNameForRole(state, role);
+  const participantName = nameForRole(state, role);
+
+  await ensureParticipantSession(command, workspaceDir, sessionName);
+
+  const mainResult = await runParticipantPromptCommand({
+    agentCommand: command,
+    workspaceDir,
+    sessionName,
+    prompt,
+    timeoutMs: PARTICIPANT_TURN_TIMEOUT_MS,
+  });
+  const mainAttempt = classifyStructuredPromptAttempt(mainResult, normalize);
+  if (mainAttempt.ok) {
+    return mainAttempt;
+  }
+  if (!mainAttempt.retryable) {
+    throw new Error(`${participantName} failed during ${kindLabel} turn: ${mainAttempt.reason}`);
+  }
+  if (mainAttempt.timedOut) {
+    await cancelParticipantPrompt(command, workspaceDir, sessionName);
+  }
+
+  const graceResult = await runParticipantPromptCommand({
+    agentCommand: command,
+    workspaceDir,
+    sessionName,
+    prompt: gracePrompt,
+    timeoutMs: PARTICIPANT_GRACE_TIMEOUT_MS,
+  });
+  const graceAttempt = classifyStructuredPromptAttempt(graceResult, normalize);
+  if (graceAttempt.ok) {
+    return graceAttempt;
+  }
+  if (!graceAttempt.retryable) {
+    throw new Error(
+      `${participantName} failed during ${kindLabel} grace turn: ${graceAttempt.reason}`,
+    );
+  }
+  if (graceAttempt.timedOut) {
+    await cancelParticipantPrompt(command, workspaceDir, sessionName);
+  }
+
+  return {
+    ok: false,
+    reason: [
+      `${participantName} did not return a valid ${kindLabel} within the 30-minute turn window.`,
+      `A one-minute finalization retry was sent, but no valid ${kindLabel} was returned.`,
+      `Main attempt: ${mainAttempt.reason}`,
+      `Finalization retry: ${graceAttempt.reason}`,
+      "Automatic turn loss recorded by the match runner.",
+    ].join(" "),
+  };
+}
+
+function classifyStructuredPromptAttempt<T>(
+  result: CliCommandResult,
+  normalize: (raw: unknown) => T,
+):
+  | {
+      ok: true;
+      value: T;
+    }
+  | {
+      ok: false;
+      retryable: boolean;
+      timedOut: boolean;
+      reason: string;
+    } {
+  if (result.exitCode === 0) {
+    try {
+      const raw = extractJsonObject(result.stdout);
+      return {
+        ok: true,
+        value: normalize(raw),
+      };
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      return {
+        ok: false,
+        retryable: true,
+        timedOut: false,
+        reason: `returned invalid structured output: ${reason}`,
+      };
+    }
+  }
+
+  if (isTimeoutCliResult(result)) {
+    return {
+      ok: false,
+      retryable: true,
+      timedOut: true,
+      reason: `timed out after ${Math.round(result.timeoutMs / 1000)} seconds`,
+    };
+  }
+
+  return {
+    ok: false,
+    retryable: false,
+    timedOut: false,
+    reason: describeCliFailure(result),
+  };
+}
+
+async function ensureParticipantSession(
+  agentCommand: string,
+  workspaceDir: string,
+  sessionName: string,
+): Promise<void> {
+  const result = await runAcpxCommand({
+    args: [
+      "--approve-all",
+      "--format",
+      "quiet",
+      "--cwd",
+      workspaceDir,
+      "--agent",
+      agentCommand,
+      "sessions",
+      "ensure",
+      "--name",
+      sessionName,
+    ],
+    cwd: workspaceDir,
+  });
+  if (result.exitCode !== 0) {
+    throw new Error(`Failed to ensure participant session: ${describeCliFailure(result)}`);
+  }
+}
+
+async function cancelParticipantPrompt(
+  agentCommand: string,
+  workspaceDir: string,
+  sessionName: string,
+): Promise<void> {
+  const result = await runAcpxCommand({
+    args: [
+      "--approve-all",
+      "--format",
+      "quiet",
+      "--cwd",
+      workspaceDir,
+      "--agent",
+      agentCommand,
+      "cancel",
+      "-s",
+      sessionName,
+    ],
+    cwd: workspaceDir,
+  });
+
+  if (
+    result.exitCode !== 0 &&
+    !/nothing to cancel/i.test(result.stdout) &&
+    !/nothing to cancel/i.test(result.stderr)
+  ) {
+    throw new Error(`Failed to cancel participant prompt: ${describeCliFailure(result)}`);
+  }
+}
+
+async function runParticipantPromptCommand(options: {
+  agentCommand: string;
+  workspaceDir: string;
+  sessionName: string;
+  prompt: string;
+  timeoutMs: number;
+}): Promise<CliCommandResult> {
+  return await runAcpxCommand({
+    args: [
+      "--approve-all",
+      "--format",
+      "quiet",
+      "--cwd",
+      options.workspaceDir,
+      "--agent",
+      options.agentCommand,
+      "--timeout",
+      String(Math.ceil(options.timeoutMs / 1000)),
+      "prompt",
+      "-s",
+      options.sessionName,
+      "-f",
+      "-",
+    ],
+    cwd: options.workspaceDir,
+    stdin: options.prompt,
+    timeoutMs: options.timeoutMs + 15_000,
+  });
+}
+
+type CliCommandResult = {
+  stdout: string;
+  stderr: string;
+  exitCode: number | null;
+  signal: NodeJS.Signals | null;
+  timeoutMs: number;
+};
+
+async function runAcpxCommand(options: {
+  args: string[];
+  cwd: string;
+  stdin?: string;
+  timeoutMs?: number;
+}): Promise<CliCommandResult> {
+  const invocation = resolveAcpxCliInvocation();
+
+  return await new Promise<CliCommandResult>((resolve, reject) => {
+    const child = spawn(invocation.command, [...invocation.baseArgs, ...options.args], {
+      cwd: options.cwd,
+      env: process.env,
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+
+    const stdoutChunks: string[] = [];
+    const stderrChunks: string[] = [];
+    let settled = false;
+    let timer: NodeJS.Timeout | undefined;
+
+    const finish = (result: CliCommandResult) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      if (timer) {
+        clearTimeout(timer);
+      }
+      resolve(result);
+    };
+
+    child.stdout.on("data", (chunk: Buffer | string) => {
+      stdoutChunks.push(String(chunk));
+    });
+    child.stderr.on("data", (chunk: Buffer | string) => {
+      stderrChunks.push(String(chunk));
+    });
+    child.on("error", (error) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      if (timer) {
+        clearTimeout(timer);
+      }
+      reject(error);
+    });
+    child.on("close", (exitCode, signal) => {
+      finish({
+        stdout: stdoutChunks.join("").trim(),
+        stderr: stderrChunks.join("").trim(),
+        exitCode,
+        signal,
+        timeoutMs: options.timeoutMs ?? 0,
+      });
+    });
+
+    if (options.timeoutMs && options.timeoutMs > 0) {
+      timer = setTimeout(() => {
+        void child.kill("SIGTERM");
+      }, options.timeoutMs);
+    }
+
+    if (options.stdin) {
+      child.stdin.end(options.stdin);
+    } else {
+      child.stdin.end();
+    }
+  });
+}
+
+function resolveAcpxCliInvocation(): {
+  command: string;
+  baseArgs: string[];
+} {
+  const cliEntry = process.argv[1];
+  if (!cliEntry) {
+    throw new Error("Unable to resolve the acpx CLI entrypoint from process.argv[1].");
+  }
+  if (/\.(cts|mts|ts|tsx)$/i.test(cliEntry)) {
+    const tsxPath = path.resolve(path.dirname(cliEntry), "..", "node_modules", ".bin", "tsx");
+    if (!existsSync(tsxPath)) {
+      throw new Error(`Unable to find tsx next to source acpx CLI: ${tsxPath}`);
+    }
+    return {
+      command: tsxPath,
+      baseArgs: [cliEntry],
+    };
+  }
+  return {
+    command: process.execPath,
+    baseArgs: [cliEntry],
+  };
+}
+
+function isTimeoutCliResult(result: CliCommandResult): boolean {
+  return (
+    result.exitCode === 3 ||
+    /Timed out after/i.test(result.stderr) ||
+    /Timed out after/i.test(result.stdout)
+  );
+}
+
+function describeCliFailure(result: CliCommandResult): string {
+  const parts = [
+    result.exitCode == null ? "process exited without code" : `exit code ${result.exitCode}`,
+    ...(result.signal ? [`signal ${result.signal}`] : []),
+    ...(result.stderr ? [`stderr: ${result.stderr}`] : []),
+    ...(result.stdout ? [`stdout: ${result.stdout}`] : []),
+  ];
+  return parts.join(", ");
+}
+
+function asObject(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  return value as Record<string, unknown>;
+}
+
+function readAgentCommandFromConfig(
+  agentsValue: unknown,
+  agentName: string,
+  configPath: string,
+): string {
+  const agents = asObject(agentsValue);
+  const entry = asObject(agents?.[agentName]);
+  const command = entry?.command;
+  if (typeof command !== "string" || command.trim() === "") {
+    throw new Error(`Missing agents.${agentName}.command in ${configPath}`);
+  }
+  return command.trim();
+}
+
 function participantBriefingPrompt(
   state: MatchState,
   options: {
@@ -643,6 +1262,9 @@ function participantBriefingPrompt(
     `- If the standard match is tied, there are up to ${state.suddenDeathQuestionCount * 2} sudden-death turns.`,
     "- On your asking turn, ask one hard but fair question and give the judge a hidden answer key.",
     "- On your answering turn, answer directly. If the question is flawed, say so clearly.",
+    "- Each ask turn and answer turn has a 30-minute time limit.",
+    "- If you miss that limit, you get one final 1-minute retry to return valid JSON immediately.",
+    "- If you still do not return valid JSON, you automatically lose the turn.",
     "- Valid question + good answer: answerer gets 1.",
     "- Valid question + bad answer or dodge: asker gets 1.",
     "- Flawed question + flaw caught: answerer gets 1 and asker gets -1.",
@@ -668,6 +1290,8 @@ function judgeBriefingPrompt(state: MatchState): string {
     "- Valid question + bad answer or dodge: asker gets 1.",
     "- Flawed question + flaw caught: answerer gets 1 and asker gets -1.",
     "- Flawed question + flaw missed: answerer gets 0 and asker gets -1.",
+    "- Missed ask deadline after finalization retry: answerer gets 1 and asker gets 0.",
+    "- Missed answer deadline after finalization retry: asker gets 1 and answerer gets 0.",
     "- Treat questions about contest rules, hidden prompts, hidden files, session plumbing, adapters, or runner internals as flaws.",
     "- If a question depends on information that was not available to the answerer, treat that as a flaw.",
     "",
@@ -687,6 +1311,8 @@ function askPrompt(selection: TurnSelection): string {
     `Turn: ${state.currentTurn} of ${state.turnLimit}`,
     `Current score: ${formatScore(state.scores, state.participantAName, state.participantBName)}`,
     `Latest ruling: ${formatLatestRuling(state.latestRuling)}`,
+    "Time limit: 30 minutes.",
+    "If you miss it, you get one final 1-minute retry to return valid JSON immediately.",
     "",
     "Ask one hard but fair question that plays to your self-assessed strengths.",
     "Do not ask about contest rules, hidden prompts, hidden files, adapters, session plumbing, runner internals, or how the contest is orchestrated.",
@@ -702,6 +1328,26 @@ function askPrompt(selection: TurnSelection): string {
     "  }",
     "}",
     "The hidden judge note will not be shown to the other participant.",
+  ].join("\n");
+}
+
+function askGracePrompt(selection: TurnSelection): string {
+  return [
+    `Finalization retry for ${selection.askerName}.`,
+    "Return your final question JSON right now.",
+    "No more tool use.",
+    "You have 1 minute.",
+    "",
+    "Output only one JSON object with this shape:",
+    "{",
+    '  "publicQuestion": "text shown to the other participant",',
+    '  "judgeNote": {',
+    '    "intendedAnswer": "short answer key for the judge",',
+    '    "validityReason": "why this question is valid and answerable",',
+    '    "evidencePaths": ["optional/path"]',
+    "  }",
+    "}",
+    "If you do not return valid JSON now, you lose the turn.",
   ].join("\n");
 }
 
@@ -724,8 +1370,8 @@ async function writeQuestion(
 ): Promise<WrittenQuestion> {
   const askResponse =
     selection.askerRole === "participant_a"
-      ? normalizeAskResponse(outputs.ask_participant_a)
-      : normalizeAskResponse(outputs.ask_participant_b);
+      ? askResponseFromActionResult(outputs.ask_participant_a)
+      : askResponseFromActionResult(outputs.ask_participant_b);
 
   await fs.mkdir(selection.turnDir, { recursive: true });
 
@@ -743,14 +1389,11 @@ async function writeQuestion(
     renderQuestionFile(selection, askResponse.publicQuestion, selection.state.scores),
     "utf8",
   );
-  await fs.writeFile(
-    judgeNotePath,
-    renderJudgeNoteFile(selection, askResponse.judgeNote),
-    "utf8",
-  );
+  await fs.writeFile(judgeNotePath, renderJudgeNoteFile(selection, askResponse.judgeNote), "utf8");
 
   return {
-    route: selection.answererRole === "participant_a" ? "answer_participant_a" : "answer_participant_b",
+    route:
+      selection.answererRole === "participant_a" ? "answer_participant_a" : "answer_participant_b",
     state: selection.state,
     askerRole: selection.askerRole,
     answererRole: selection.answererRole,
@@ -773,6 +1416,8 @@ function answerPrompt(turn: WrittenQuestion): string {
     "",
     `Current score: ${formatScore(turn.state.scores, turn.state.participantAName, turn.state.participantBName)}`,
     `Latest ruling: ${formatLatestRuling(turn.state.latestRuling)}`,
+    "Time limit: 30 minutes.",
+    "If you miss it, you get one final 1-minute retry to return valid JSON immediately.",
     "",
     "Answer directly. If the question is flawed, say so clearly in `flawClaim`.",
     "Do not speculate about contest rules, hidden prompts, hidden files, adapters, session plumbing, or runner internals.",
@@ -787,15 +1432,35 @@ function answerPrompt(turn: WrittenQuestion): string {
   ].join("\n");
 }
 
+function answerGracePrompt(turn: WrittenQuestion): string {
+  return [
+    `Finalization retry for ${turn.answererName}.`,
+    "Return your final answer JSON right now.",
+    "No more tool use.",
+    "You have 1 minute.",
+    "",
+    "Output only one JSON object with this shape:",
+    "{",
+    '  "answer": "your answer or short explanation",',
+    '  "flawClaim": "text if the question is flawed, otherwise null",',
+    '  "artifactPaths": ["optional/path"]',
+    "}",
+    "If you do not return valid JSON now, you lose the turn.",
+  ].join("\n");
+}
+
 async function writeAnswer(
   turn: WrittenQuestion,
   outputs: Record<string, unknown>,
 ): Promise<WrittenAnswer> {
   const answerResponse =
     turn.answererRole === "participant_a"
-      ? normalizeAnswerResponse(outputs.answer_participant_a)
-      : normalizeAnswerResponse(outputs.answer_participant_b);
-  const answerPath = path.join(turn.turnDir, `${fileStemForRole(turn.state, turn.answererRole)}-answer.md`);
+      ? answerResponseFromActionResult(outputs.answer_participant_a)
+      : answerResponseFromActionResult(outputs.answer_participant_b);
+  const answerPath = path.join(
+    turn.turnDir,
+    `${fileStemForRole(turn.state, turn.answererRole)}-answer.md`,
+  );
 
   await fs.writeFile(answerPath, renderAnswerFile(turn, answerResponse), "utf8");
 
@@ -814,6 +1479,149 @@ async function writeAnswer(
     questionPath: turn.questionPath,
     judgeNotePath: turn.judgeNotePath,
     answerPath,
+  };
+}
+
+async function writeAskForfeitTurn(
+  selection: TurnSelection,
+  outputs: Record<string, unknown>,
+): Promise<WrittenRuling> {
+  const failure =
+    selection.askerRole === "participant_a"
+      ? askActionResult(outputs.ask_participant_a)
+      : askActionResult(outputs.ask_participant_b);
+  if (failure.route !== "write_ask_forfeit_turn") {
+    throw new Error("Expected an ask forfeit result.");
+  }
+
+  await fs.mkdir(selection.turnDir, { recursive: true });
+
+  const questionPath = path.join(
+    selection.turnDir,
+    `${fileStemForRole(selection.state, selection.askerRole)}-question.md`,
+  );
+  const judgeNotePath = path.join(
+    selection.turnDir,
+    `${fileStemForRole(selection.state, selection.askerRole)}-judge-note.md`,
+  );
+  const answerPath = path.join(
+    selection.turnDir,
+    `${fileStemForRole(selection.state, selection.answererRole)}-answer.md`,
+  );
+
+  await fs.writeFile(
+    questionPath,
+    renderAskForfeitQuestionFile(selection, selection.state.scores, failure.reason),
+    "utf8",
+  );
+  await fs.writeFile(
+    judgeNotePath,
+    renderAskForfeitJudgeNoteFile(selection, failure.reason),
+    "utf8",
+  );
+  await fs.writeFile(answerPath, renderAskForfeitAnswerFile(selection), "utf8");
+
+  return await writeSyntheticRuling({
+    state: selection.state,
+    askerRole: selection.askerRole,
+    answererRole: selection.answererRole,
+    askerName: selection.askerName,
+    answererName: selection.answererName,
+    turnDir: selection.turnDir,
+    outcome: "asker_forfeit",
+    reason: failure.reason,
+    questionPath,
+    judgeNotePath,
+    answerPath,
+  });
+}
+
+async function writeAnswerForfeitTurn(
+  turn: WrittenQuestion,
+  outputs: Record<string, unknown>,
+): Promise<WrittenRuling> {
+  const failure =
+    turn.answererRole === "participant_a"
+      ? answerActionResult(outputs.answer_participant_a)
+      : answerActionResult(outputs.answer_participant_b);
+  if (failure.route !== "write_answer_forfeit_turn") {
+    throw new Error("Expected an answer forfeit result.");
+  }
+
+  const answerPath = path.join(
+    turn.turnDir,
+    `${fileStemForRole(turn.state, turn.answererRole)}-answer.md`,
+  );
+  await fs.writeFile(answerPath, renderAnswerForfeitFile(turn, failure.reason), "utf8");
+
+  return await writeSyntheticRuling({
+    state: turn.state,
+    askerRole: turn.askerRole,
+    answererRole: turn.answererRole,
+    askerName: turn.askerName,
+    answererName: turn.answererName,
+    turnDir: turn.turnDir,
+    outcome: "answerer_forfeit",
+    reason: failure.reason,
+    questionPath: turn.questionPath,
+    judgeNotePath: turn.judgeNotePath,
+    answerPath,
+  });
+}
+
+async function writeSyntheticRuling(options: {
+  state: MatchState;
+  askerRole: MatchRole;
+  answererRole: MatchRole;
+  askerName: string;
+  answererName: string;
+  turnDir: string;
+  outcome: AutomaticOutcome;
+  reason: string;
+  questionPath: string;
+  judgeNotePath: string;
+  answerPath: string;
+}): Promise<WrittenRuling> {
+  const { askerDelta, answererDelta } = scoreDeltasForOutcome(options.outcome);
+  const rulingPath = path.join(options.turnDir, `${options.state.judgeFileStem}-ruling.md`);
+
+  await fs.writeFile(
+    rulingPath,
+    renderSyntheticRulingFile(options.state, {
+      turn: options.state.currentTurn,
+      phase: options.state.phase,
+      askerRole: options.askerRole,
+      answererRole: options.answererRole,
+      askerName: options.askerName,
+      answererName: options.answererName,
+      outcome: options.outcome,
+      reason: options.reason,
+      askerDelta,
+      answererDelta,
+      rulingPath,
+      questionPath: options.questionPath,
+      judgeNotePath: options.judgeNotePath,
+      answerPath: options.answerPath,
+    }),
+    "utf8",
+  );
+
+  return {
+    state: options.state,
+    turn: options.state.currentTurn,
+    phase: options.state.phase,
+    askerRole: options.askerRole,
+    answererRole: options.answererRole,
+    askerName: options.askerName,
+    answererName: options.answererName,
+    outcome: options.outcome,
+    reason: options.reason,
+    askerDelta,
+    answererDelta,
+    rulingPath,
+    questionPath: options.questionPath,
+    judgeNotePath: options.judgeNotePath,
+    answerPath: options.answerPath,
   };
 }
 
@@ -1045,7 +1853,7 @@ function normalizeAnswerResponse(raw: unknown): AnswerResponse {
 
 function normalizeJudgeResponse(raw: unknown): JudgeResponse {
   const value = raw as Partial<JudgeResponse>;
-  const outcome = String(value.outcome ?? "").trim() as JudgeOutcome;
+  const outcome = String(value.outcome ?? "").trim() as JudgedOutcome;
   const reason = String(value.reason ?? "").trim();
   if (!reason) {
     throw new Error("Judge response must include a reason.");
@@ -1064,7 +1872,7 @@ function normalizeJudgeResponse(raw: unknown): JudgeResponse {
   };
 }
 
-function scoreDeltasForOutcome(outcome: JudgeOutcome): {
+function scoreDeltasForOutcome(outcome: TurnOutcome): {
   askerDelta: number;
   answererDelta: number;
 } {
@@ -1089,6 +1897,16 @@ function scoreDeltasForOutcome(outcome: JudgeOutcome): {
         askerDelta: -1,
         answererDelta: 0,
       };
+    case "asker_forfeit":
+      return {
+        askerDelta: 0,
+        answererDelta: 1,
+      };
+    case "answerer_forfeit":
+      return {
+        askerDelta: 1,
+        answererDelta: 0,
+      };
   }
 }
 
@@ -1107,6 +1925,18 @@ function nameForRole(state: MatchState, role: MatchRole): string {
   return role === "participant_a" ? state.participantAName : state.participantBName;
 }
 
+function participantAgentCommandForRole(state: MatchState, role: MatchRole): string {
+  return role === "participant_a" ? state.participantAAgentCommand : state.participantBAgentCommand;
+}
+
+function participantSessionNameForRole(state: MatchState, role: MatchRole): string {
+  return role === "participant_a" ? state.participantASessionName : state.participantBSessionName;
+}
+
+function participantWorkspaceDirForRole(state: MatchState, role: MatchRole): string {
+  return role === "participant_a" ? state.participantAWorkspaceDir : state.participantBWorkspaceDir;
+}
+
 function fileStemForRole(state: MatchState, role: MatchRole): string {
   return role === "participant_a" ? state.participantAFileStem : state.participantBFileStem;
 }
@@ -1115,9 +1945,7 @@ function normalizeStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) {
     return [];
   }
-  return value
-    .map((entry) => String(entry ?? "").trim())
-    .filter((entry) => entry.length > 0);
+  return value.map((entry) => String(entry ?? "").trim()).filter((entry) => entry.length > 0);
 }
 
 function sanitizeNameForPath(value: string): string {
@@ -1144,7 +1972,11 @@ function formatTurnDir(turn: number): string {
   return `turn-${String(turn).padStart(2, "0")}`;
 }
 
-function formatScore(scores: ScoreState, participantAName: string, participantBName: string): string {
+function formatScore(
+  scores: ScoreState,
+  participantAName: string,
+  participantBName: string,
+): string {
   return `${participantAName} ${scores.participantA}, ${participantBName} ${scores.participantB}`;
 }
 
@@ -1175,7 +2007,8 @@ function finalResult(state: MatchState): string {
 
 function renderManifest(state: MatchState): string {
   const latestCompletedTurn = state.history.at(-1)?.turn ?? 0;
-  const nextScheduledTurn = state.currentTurn <= state.turnLimit ? String(state.currentTurn) : "none";
+  const nextScheduledTurn =
+    state.currentTurn <= state.turnLimit ? String(state.currentTurn) : "none";
   return [
     "# AI Battle Manifest",
     "",
@@ -1222,6 +2055,31 @@ function renderQuestionFile(
   ].join("\n");
 }
 
+function renderAskForfeitQuestionFile(
+  selection: TurnSelection,
+  scores: ScoreState,
+  reason: string,
+): string {
+  return [
+    `# ${selection.askerName} Question`,
+    "",
+    `- Phase: \`${formatPhaseLabel(selection.state.phase)}\``,
+    `- Turn: \`${selection.state.currentTurn}\``,
+    `- Asker: \`${selection.askerName}\``,
+    `- Answerer: \`${selection.answererName}\``,
+    `- Score before turn: \`${formatScore(scores, selection.state.participantAName, selection.state.participantBName)}\``,
+    "",
+    "## Question",
+    "",
+    "(no valid question was returned before the deadline)",
+    "",
+    "## Runner Note",
+    "",
+    reason,
+    "",
+  ].join("\n");
+}
+
 function renderJudgeNoteFile(selection: TurnSelection, judgeNote: JudgeNote): string {
   return [
     `# ${selection.askerName} Judge Note`,
@@ -1240,7 +2098,32 @@ function renderJudgeNoteFile(selection: TurnSelection, judgeNote: JudgeNote): st
     "",
     "## Evidence Paths",
     "",
-    ...(judgeNote.evidencePaths?.length ? judgeNote.evidencePaths.map((entry) => `- \`${entry}\``) : ["- `(none)`"]),
+    ...(judgeNote.evidencePaths?.length
+      ? judgeNote.evidencePaths.map((entry) => `- \`${entry}\``)
+      : ["- `(none)`"]),
+    "",
+  ].join("\n");
+}
+
+function renderAskForfeitJudgeNoteFile(selection: TurnSelection, reason: string): string {
+  return [
+    `# ${selection.askerName} Judge Note`,
+    "",
+    `- Phase: \`${formatPhaseLabel(selection.state.phase)}\``,
+    `- Turn: \`${selection.state.currentTurn}\``,
+    `- For judge only: \`true\``,
+    "",
+    "## Intended Answer",
+    "",
+    "(no valid hidden answer key was returned before the deadline)",
+    "",
+    "## Validity Reason",
+    "",
+    reason,
+    "",
+    "## Evidence Paths",
+    "",
+    "- `(none)`",
     "",
   ].join("\n");
 }
@@ -1263,7 +2146,59 @@ function renderAnswerFile(turn: WrittenQuestion, answer: AnswerResponse): string
     "",
     "## Artifact Paths",
     "",
-    ...(answer.artifactPaths.length > 0 ? answer.artifactPaths.map((entry) => `- \`${entry}\``) : ["- `(none)`"]),
+    ...(answer.artifactPaths.length > 0
+      ? answer.artifactPaths.map((entry) => `- \`${entry}\``)
+      : ["- `(none)`"]),
+    "",
+  ].join("\n");
+}
+
+function renderAskForfeitAnswerFile(selection: TurnSelection): string {
+  return [
+    `# ${selection.answererName} Answer`,
+    "",
+    `- Phase: \`${formatPhaseLabel(selection.state.phase)}\``,
+    `- Turn: \`${selection.state.currentTurn}\``,
+    `- Asked by: \`${selection.askerName}\``,
+    "",
+    "## Answer",
+    "",
+    "(no answer was required because the asker forfeited before submitting a valid question)",
+    "",
+    "## Flaw Claim",
+    "",
+    "(none)",
+    "",
+    "## Artifact Paths",
+    "",
+    "- `(none)`",
+    "",
+  ].join("\n");
+}
+
+function renderAnswerForfeitFile(turn: WrittenQuestion, reason: string): string {
+  return [
+    `# ${turn.answererName} Answer`,
+    "",
+    `- Phase: \`${formatPhaseLabel(turn.state.phase)}\``,
+    `- Turn: \`${turn.state.currentTurn}\``,
+    `- Asked by: \`${turn.askerName}\``,
+    "",
+    "## Answer",
+    "",
+    "(no valid answer was returned before the deadline)",
+    "",
+    "## Flaw Claim",
+    "",
+    "(none)",
+    "",
+    "## Artifact Paths",
+    "",
+    "- `(none)`",
+    "",
+    "## Runner Note",
+    "",
+    reason,
     "",
   ].join("\n");
 }
@@ -1307,6 +2242,28 @@ function renderRulingFile(
     "## Reason",
     "",
     judgeResponse.reason,
+    "",
+  ].join("\n");
+}
+
+function renderSyntheticRulingFile(state: MatchState, ruling: WrittenRuling): string {
+  const nextScores = updatedScoresAfterRuling(state.scores, ruling);
+  return [
+    `# ${state.judgeName} Ruling`,
+    "",
+    `- Phase: \`${formatPhaseLabel(state.phase)}\``,
+    `- Turn: \`${state.currentTurn}\``,
+    `- Asker: \`${ruling.askerName}\``,
+    `- Answerer: \`${ruling.answererName}\``,
+    `- Outcome: \`${ruling.outcome}\``,
+    `- Asker delta: \`${ruling.askerDelta}\``,
+    `- Answerer delta: \`${ruling.answererDelta}\``,
+    `- Score after turn: \`${formatScore(nextScores, state.participantAName, state.participantBName)}\``,
+    `- Issued by runner: \`true\``,
+    "",
+    "## Reason",
+    "",
+    ruling.reason,
     "",
   ].join("\n");
 }

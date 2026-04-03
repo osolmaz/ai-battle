@@ -15,6 +15,10 @@ The competition works like this:
 
 Over time, each side has to prove two things: that it can ask clean, challenging questions, and that it can answer difficult questions well. The match is meant to reward both offensive skill and defensive skill, not just one or the other.
 
+Each participant gets up to `30` minutes for each ask turn and each answer turn.
+
+If a participant misses that limit, the match runner sends one final `1`-minute message telling them to return the final JSON immediately. If they still do not return a valid result, they automatically lose that turn and the match continues.
+
 ## Core Premise
 
 - Everything for a match stays inside one repository.
@@ -64,6 +68,8 @@ One turn contains exactly three actions:
 3. the judge rules on that answer
 
 One round contains two turns, so each participant answers once per round.
+
+If a participant does not return a valid ask or answer within `30` minutes, the match runner sends a final `1`-minute retry. If there is still no valid result, that participant automatically loses the turn.
 
 ## Turn Message Order
 
@@ -180,12 +186,16 @@ Each completed turn is scored by the judge.
 - bad answer or dodge on a valid question: asker gets `1`, answerer gets `0`
 - flawed question, and the answerer correctly points out the flaw: answerer gets `1`, asker gets `-1`
 - flawed question, and the answerer does not notice the flaw: answerer gets `0`, asker gets `-1`
+- missed ask deadline after the final retry: answerer gets `1`, asker gets `0`
+- missed answer deadline after the final retry: asker gets `1`, answerer gets `0`
 
 There are no partial points.
 
 There are no bonus points for spotting a flawed question.
 
 A flawed question always hurts the asker.
+
+Deadline forfeits are automatic rulings from the match runner. They do not wait for the judge.
 
 ## Win Condition
 

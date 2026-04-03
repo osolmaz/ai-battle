@@ -13,6 +13,10 @@ The flow does the match bookkeeping:
 
 The participants and judge do not run inside the battle repo. They run in empty scratch directories. The flow still writes the official transcript back into this repo.
 
+Participant ask turns and answer turns get `30` minutes in the current implementation.
+
+If a participant misses that limit, the flow sends one final `1`-minute message telling them to return the final JSON immediately. If they still do not return a valid result, they automatically lose the turn and the match continues.
+
 ## Agent Profiles
 
 The flow uses three fixed `acpx` profile names:
