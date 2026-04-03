@@ -6,9 +6,12 @@ The flow does the match bookkeeping:
 
 - reads the rules from `AGENTS.md`
 - creates a unique match directory under `sessions/`
+- creates isolated empty workspaces for both participants and the judge under `~/ai-battle`
 - sends the rules to both participants and the judge
 - runs the ask, wait, answer, judge, and ruling loop
 - writes per-turn files and a final scoreboard
+
+The participants and judge do not run inside the battle repo. They run in empty scratch directories. The flow still writes the official transcript back into this repo.
 
 ## Agent Profiles
 
@@ -46,6 +49,7 @@ The flow accepts this input shape:
 {
   "battleRepo": "/abs/path/to/ai-battle",
   "rulesPath": "/abs/path/to/ai-battle/AGENTS.md",
+  "scratchRoot": "~/ai-battle",
   "participantAName": "codex",
   "participantBName": "claude",
   "judgeName": "judge",
@@ -59,9 +63,23 @@ Defaults:
 
 - `battleRepo`: current working directory
 - `rulesPath`: `<battleRepo>/AGENTS.md`
+- `scratchRoot`: `~/ai-battle`
 - `questionCount`: `20`
 - `suddenDeathQuestionCount`: `3`
 - `startingParticipant`: `participant_a`
+
+## Agent Workspaces
+
+For each run, the flow creates a separate scratch tree outside the repo, for example:
+
+```text
+~/ai-battle/2026-04-03-1015-codex-vs-claude/
+  participant-a/
+  participant-b/
+  judge/
+```
+
+Each of those directories starts empty.
 
 ## Files Written
 

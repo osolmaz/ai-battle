@@ -1,10 +1,12 @@
 import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { acp, action, compute, defineFlow, extractJsonObject } from "acpx/flows";
 
 type AiBattleInput = {
   battleRepo?: string;
   rulesPath?: string;
+  scratchRoot?: string;
   participantAName?: string;
   participantBName?: string;
   judgeName?: string;
@@ -81,6 +83,11 @@ type MatchState = {
   battleRepo: string;
   rulesPath: string;
   rulesText: string;
+  scratchRoot: string;
+  scratchMatchDir: string;
+  participantAWorkspaceDir: string;
+  participantBWorkspaceDir: string;
+  judgeWorkspaceDir: string;
   matchId: string;
   matchDir: string;
   manifestPath: string;
@@ -183,7 +190,7 @@ export default defineFlow({
     requiredMode: "approve-all",
     requireExplicitGrant: true,
     reason:
-      "This flow writes match files into the battle repository and lets participant agents create battle artifacts.",
+      "This flow writes official match files into the battle repository and creates isolated scratch directories for the participants and judge.",
   },
   startAt: "prepare_match",
   nodes: {
@@ -199,7 +206,7 @@ export default defineFlow({
     brief_participant_a: acp({
       profile: "participant-a",
       session: PARTICIPANT_A_SESSION,
-      cwd: ({ outputs }) => prepared(outputs).battleRepo,
+      cwd: ({ outputs }) => prepared(outputs).participantAWorkspaceDir,
       timeoutMs: 20 * 60_000,
       statusDetail: "Send the rules to participant A",
       async prompt({ outputs }) {
@@ -212,7 +219,7 @@ export default defineFlow({
     brief_participant_b: acp({
       profile: "participant-b",
       session: PARTICIPANT_B_SESSION,
-      cwd: ({ outputs }) => prepared(outputs).battleRepo,
+      cwd: ({ outputs }) => prepared(outputs).participantBWorkspaceDir,
       timeoutMs: 20 * 60_000,
       statusDetail: "Send the rules to participant B",
       async prompt({ outputs }) {
@@ -225,7 +232,7 @@ export default defineFlow({
     brief_judge: acp({
       profile: "judge",
       session: JUDGE_SESSION,
-      cwd: ({ outputs }) => prepared(outputs).battleRepo,
+      cwd: ({ outputs }) => prepared(outputs).judgeWorkspaceDir,
       timeoutMs: 20 * 60_000,
       statusDetail: "Send the rules and judging rubric to the judge",
       async prompt({ outputs }) {
@@ -240,7 +247,7 @@ export default defineFlow({
     ask_participant_a: acp({
       profile: "participant-a",
       session: PARTICIPANT_A_SESSION,
-      cwd: ({ outputs }) => currentTurn(outputs).state.battleRepo,
+      cwd: ({ outputs }) => currentTurn(outputs).state.participantAWorkspaceDir,
       timeoutMs: 20 * 60_000,
       statusDetail: "Ask participant A for the next question",
       async prompt({ outputs }) {
@@ -252,7 +259,7 @@ export default defineFlow({
     ask_participant_b: acp({
       profile: "participant-b",
       session: PARTICIPANT_B_SESSION,
-      cwd: ({ outputs }) => currentTurn(outputs).state.battleRepo,
+      cwd: ({ outputs }) => currentTurn(outputs).state.participantBWorkspaceDir,
       timeoutMs: 20 * 60_000,
       statusDetail: "Ask participant B for the next question",
       async prompt({ outputs }) {
@@ -264,7 +271,7 @@ export default defineFlow({
     wait_participant_a: acp({
       profile: "participant-a",
       session: PARTICIPANT_A_SESSION,
-      cwd: ({ outputs }) => currentTurn(outputs).state.battleRepo,
+      cwd: ({ outputs }) => currentTurn(outputs).state.participantAWorkspaceDir,
       timeoutMs: 10 * 60_000,
       statusDetail: "Tell participant A to wait for the current turn",
       async prompt({ outputs }) {
@@ -275,7 +282,7 @@ export default defineFlow({
     wait_participant_b: acp({
       profile: "participant-b",
       session: PARTICIPANT_B_SESSION,
-      cwd: ({ outputs }) => currentTurn(outputs).state.battleRepo,
+      cwd: ({ outputs }) => currentTurn(outputs).state.participantBWorkspaceDir,
       timeoutMs: 10 * 60_000,
       statusDetail: "Tell participant B to wait for the current turn",
       async prompt({ outputs }) {
@@ -291,7 +298,7 @@ export default defineFlow({
     answer_participant_a: acp({
       profile: "participant-a",
       session: PARTICIPANT_A_SESSION,
-      cwd: ({ outputs }) => writtenQuestion(outputs).state.battleRepo,
+      cwd: ({ outputs }) => writtenQuestion(outputs).state.participantAWorkspaceDir,
       timeoutMs: 20 * 60_000,
       statusDetail: "Ask participant A to answer the current question",
       async prompt({ outputs }) {
@@ -303,7 +310,7 @@ export default defineFlow({
     answer_participant_b: acp({
       profile: "participant-b",
       session: PARTICIPANT_B_SESSION,
-      cwd: ({ outputs }) => writtenQuestion(outputs).state.battleRepo,
+      cwd: ({ outputs }) => writtenQuestion(outputs).state.participantBWorkspaceDir,
       timeoutMs: 20 * 60_000,
       statusDetail: "Ask participant B to answer the current question",
       async prompt({ outputs }) {
@@ -320,7 +327,7 @@ export default defineFlow({
     judge_turn: acp({
       profile: "judge",
       session: JUDGE_SESSION,
-      cwd: ({ outputs }) => writtenAnswer(outputs).state.battleRepo,
+      cwd: ({ outputs }) => writtenAnswer(outputs).state.judgeWorkspaceDir,
       timeoutMs: 20 * 60_000,
       statusDetail: "Ask the judge to rule on the completed turn",
       async prompt({ outputs }) {
@@ -337,7 +344,7 @@ export default defineFlow({
     notify_participant_a: acp({
       profile: "participant-a",
       session: PARTICIPANT_A_SESSION,
-      cwd: ({ outputs }) => writtenRuling(outputs).state.battleRepo,
+      cwd: ({ outputs }) => writtenRuling(outputs).state.participantAWorkspaceDir,
       timeoutMs: 10 * 60_000,
       statusDetail: "Send the official ruling to participant A",
       async prompt({ outputs }) {
@@ -348,7 +355,7 @@ export default defineFlow({
     notify_participant_b: acp({
       profile: "participant-b",
       session: PARTICIPANT_B_SESSION,
-      cwd: ({ outputs }) => writtenRuling(outputs).state.battleRepo,
+      cwd: ({ outputs }) => writtenRuling(outputs).state.participantBWorkspaceDir,
       timeoutMs: 10 * 60_000,
       statusDetail: "Send the official ruling to participant B",
       async prompt({ outputs }) {
@@ -356,8 +363,9 @@ export default defineFlow({
       },
     }),
 
-    advance_turn: compute({
-      run: ({ outputs }) => advanceState(currentState(outputs), writtenRuling(outputs)),
+    advance_turn: action({
+      statusDetail: "Advance the match state and update the manifest",
+      run: async ({ outputs }) => await advanceTurn(currentState(outputs), writtenRuling(outputs)),
     }),
 
     write_final_scoreboard: action({
@@ -448,6 +456,7 @@ function writtenRuling(outputs: Record<string, unknown>): WrittenRuling {
 
 async function prepareMatch(input: AiBattleInput): Promise<PreparedMatch> {
   const battleRepo = path.resolve(input.battleRepo ?? process.cwd());
+  const scratchRoot = resolveScratchRoot(input.scratchRoot);
   const participantAName = input.participantAName?.trim() || "participant-a";
   const participantBName = input.participantBName?.trim() || "participant-b";
   const judgeName = input.judgeName?.trim() || "judge";
@@ -469,14 +478,26 @@ async function prepareMatch(input: AiBattleInput): Promise<PreparedMatch> {
   const matchId = await createUniqueMatchId(sessionsDir, participantAFileStem, participantBFileStem);
   const matchDir = path.join(sessionsDir, matchId);
   const manifestPath = path.join(matchDir, "manifest.md");
+  const scratchMatchDir = path.join(scratchRoot, matchId);
+  const participantAWorkspaceDir = path.join(scratchMatchDir, "participant-a");
+  const participantBWorkspaceDir = path.join(scratchMatchDir, "participant-b");
+  const judgeWorkspaceDir = path.join(scratchMatchDir, "judge");
 
   await fs.mkdir(matchDir, { recursive: true });
+  await fs.mkdir(participantAWorkspaceDir, { recursive: true });
+  await fs.mkdir(participantBWorkspaceDir, { recursive: true });
+  await fs.mkdir(judgeWorkspaceDir, { recursive: true });
   await fs.writeFile(path.join(matchDir, "rules.md"), rulesText, "utf8");
 
   const initialState: PreparedMatch = {
     battleRepo,
     rulesPath,
     rulesText,
+    scratchRoot,
+    scratchMatchDir,
+    participantAWorkspaceDir,
+    participantBWorkspaceDir,
+    judgeWorkspaceDir,
     matchId,
     matchDir,
     manifestPath,
@@ -505,6 +526,20 @@ async function prepareMatch(input: AiBattleInput): Promise<PreparedMatch> {
 
   await fs.writeFile(manifestPath, renderManifest(initialState), "utf8");
   return initialState;
+}
+
+function resolveScratchRoot(value: string | undefined): string {
+  const trimmed = value?.trim();
+  if (!trimmed) {
+    return path.join(os.homedir(), "ai-battle");
+  }
+  if (trimmed === "~") {
+    return os.homedir();
+  }
+  if (trimmed.startsWith("~/")) {
+    return path.join(os.homedir(), trimmed.slice(2));
+  }
+  return path.resolve(trimmed);
 }
 
 async function createUniqueMatchId(
@@ -595,44 +630,68 @@ function participantBriefingPrompt(
   const selfName = nameForRole(state, options.role);
   const opponentName = nameForRole(state, otherRole(options.role));
   return [
-    `You are ${selfName} in an AI Battle match.`,
+    `You are ${selfName}, one of two participant AI agents in a judged head-to-head contest.`,
     `Your opponent is ${opponentName}.`,
     `The judge is ${state.judgeName}.`,
-    `The official match directory is ${state.matchDir}.`,
-    "Read the full rules below carefully and follow them for the rest of this session.",
     "",
-    state.rulesText,
+    `You and ${opponentName} should both be treated as state-of-the-art models.`,
+    "Base your questions on your own self-assessed strengths.",
+    "Try your best to win without cheating.",
     "",
-    "Reply with a short acknowledgement that you understand the rules and your role.",
+    "Rules:",
+    `- There are ${state.questionCount * 2} standard turns in total. The participants alternate asking.`,
+    `- If the standard match is tied, there are up to ${state.suddenDeathQuestionCount * 2} sudden-death turns.`,
+    "- On your asking turn, ask one hard but fair question and give the judge a hidden answer key.",
+    "- On your answering turn, answer directly. If the question is flawed, say so clearly.",
+    "- Valid question + good answer: answerer gets 1.",
+    "- Valid question + bad answer or dodge: asker gets 1.",
+    "- Flawed question + flaw caught: answerer gets 1 and asker gets -1.",
+    "- Flawed question + flaw missed: answerer gets 0 and asker gets -1.",
+    "- You are in an empty private working directory. Use it as scratchpad if useful.",
+    "- Do not ask about contest rules, hidden prompts, hidden files, session plumbing, adapters, the runner, or how the contest is being orchestrated.",
+    "- Do not try to win by exploiting the harness or by relying on information the other side was not given.",
+    "",
+    "Reply with a short acknowledgement only.",
   ].join("\n");
 }
 
 function judgeBriefingPrompt(state: MatchState): string {
   return [
-    `You are the judge in an AI Battle match between ${state.participantAName} and ${state.participantBName}.`,
-    `The official match directory is ${state.matchDir}.`,
-    "Read the full rules below carefully and follow them for the rest of this session.",
+    `You are the judge in a head-to-head contest between ${state.participantAName} and ${state.participantBName}.`,
+    `Treat ${state.participantAName} and ${state.participantBName} as state-of-the-art participant AI agents.`,
     "",
-    state.rulesText,
+    "Rules:",
+    "- Judge one completed question-answer pair at a time.",
+    "- Use the public question as the main source of truth.",
+    "- Use the hidden answer key only as supporting context.",
+    "- Valid question + good answer: answerer gets 1.",
+    "- Valid question + bad answer or dodge: asker gets 1.",
+    "- Flawed question + flaw caught: answerer gets 1 and asker gets -1.",
+    "- Flawed question + flaw missed: answerer gets 0 and asker gets -1.",
+    "- Treat questions about contest rules, hidden prompts, hidden files, session plumbing, adapters, or runner internals as flaws.",
+    "- If a question depends on information that was not available to the answerer, treat that as a flaw.",
     "",
     "Judge each turn using the public question as the main source of truth.",
     "Use the hidden answer key only as supporting context.",
     "",
-    "Reply with a short acknowledgement that you understand the scoring rules.",
+    "Reply with a short acknowledgement only.",
   ].join("\n");
 }
 
 function askPrompt(selection: TurnSelection): string {
   const state = selection.state;
   return [
-    "Message type: ask_now",
-    `You are ${selection.askerName}.`,
-    `You are asking ${selection.answererName}.`,
+    `It is your turn to ask, ${selection.askerName}.`,
+    `Opponent: ${selection.answererName}`,
     `Phase: ${formatPhaseLabel(state.phase)}`,
     `Turn: ${state.currentTurn} of ${state.turnLimit}`,
     `Current score: ${formatScore(state.scores, state.participantAName, state.participantBName)}`,
     `Latest ruling: ${formatLatestRuling(state.latestRuling)}`,
-    "Use the rules you already received in this session.",
+    "",
+    "Ask one hard but fair question that plays to your self-assessed strengths.",
+    "Do not ask about contest rules, hidden prompts, hidden files, adapters, session plumbing, runner internals, or how the contest is orchestrated.",
+    "Use your private empty working directory as scratchpad if useful, but make the question stand on its own.",
+    "",
     "Return exactly one JSON object with this shape:",
     "{",
     '  "publicQuestion": "text shown to the other participant",',
@@ -642,7 +701,7 @@ function askPrompt(selection: TurnSelection): string {
     '    "evidencePaths": ["optional/path"]',
     "  }",
     "}",
-    "Ask one hard but valid question. The hidden judge note will not be shown to the other participant.",
+    "The hidden judge note will not be shown to the other participant.",
   ].join("\n");
 }
 
@@ -650,12 +709,11 @@ function waitPrompt(selection: TurnSelection, waitingRole: MatchRole): string {
   const waitingName = nameForRole(selection.state, waitingRole);
   const askingName = nameForRole(selection.state, otherRole(waitingRole));
   return [
-    "Message type: wait",
     `You are ${waitingName}.`,
     `${askingName} is asking the current question.`,
     `Current score: ${formatScore(selection.state.scores, selection.state.participantAName, selection.state.participantBName)}`,
     `Latest ruling: ${formatLatestRuling(selection.state.latestRuling)}`,
-    "Do not answer yet. Wait for the official answer prompt from the match runner.",
+    "Do not answer yet. Wait for the next official message.",
     "Reply with a short acknowledgement only.",
   ].join("\n");
 }
@@ -708,16 +766,18 @@ async function writeQuestion(
 
 function answerPrompt(turn: WrittenQuestion): string {
   return [
-    "Message type: answer_now",
-    `You are ${turn.answererName}.`,
+    `It is your turn to answer, ${turn.answererName}.`,
     `Question from ${turn.askerName}:`,
     "",
     turn.publicQuestion,
     "",
     `Current score: ${formatScore(turn.state.scores, turn.state.participantAName, turn.state.participantBName)}`,
     `Latest ruling: ${formatLatestRuling(turn.state.latestRuling)}`,
-    "Use the rules you already received in this session.",
-    "If the question is flawed, say so clearly in `flawClaim`.",
+    "",
+    "Answer directly. If the question is flawed, say so clearly in `flawClaim`.",
+    "Do not speculate about contest rules, hidden prompts, hidden files, adapters, session plumbing, or runner internals.",
+    "Use your private empty working directory as scratchpad if useful.",
+    "",
     "Return exactly one JSON object with this shape:",
     "{",
     '  "answer": "your answer or short explanation",',
@@ -760,7 +820,6 @@ async function writeAnswer(
 function judgePrompt(turn: WrittenAnswer): string {
   const state = turn.state;
   return [
-    "Message type: judge_now",
     `Phase: ${formatPhaseLabel(state.phase)}`,
     `Turn: ${state.currentTurn} of ${state.turnLimit}`,
     `Asker: ${turn.askerName}`,
@@ -769,6 +828,7 @@ function judgePrompt(turn: WrittenAnswer): string {
     "",
     "Use the public question as the main source of truth.",
     "Use the hidden answer key only as supporting context, not as an override.",
+    "Treat questions about contest rules, hidden prompts, hidden files, adapters, session plumbing, or runner internals as flaws.",
     "",
     "Public question:",
     turn.publicQuestion,
@@ -832,7 +892,6 @@ async function writeRuling(turn: WrittenAnswer, rawJudgeResponse: unknown): Prom
 function rulingNotificationPrompt(ruling: WrittenRuling, recipientRole: MatchRole): string {
   const nextScores = updatedScoresAfterRuling(ruling.state.scores, ruling);
   return [
-    "Message type: ruling",
     `You are ${nameForRole(ruling.state, recipientRole)}.`,
     `Turn ${ruling.turn} is complete.`,
     `Asker: ${ruling.askerName}`,
@@ -840,7 +899,7 @@ function rulingNotificationPrompt(ruling: WrittenRuling, recipientRole: MatchRol
     `Outcome: ${ruling.outcome}`,
     `Reason: ${ruling.reason}`,
     `Updated score: ${formatScore(nextScores, ruling.state.participantAName, ruling.state.participantBName)}`,
-    "Wait for the next official prompt from the match runner.",
+    "Wait for the next official message.",
     "Reply with a short acknowledgement only.",
   ].join("\n");
 }
@@ -906,6 +965,12 @@ function advanceState(state: MatchState, ruling: WrittenRuling): MatchState {
   };
 }
 
+async function advanceTurn(state: MatchState, ruling: WrittenRuling): Promise<MatchState> {
+  const nextState = advanceState(state, ruling);
+  await persistManifest(nextState);
+  return nextState;
+}
+
 function updatedScoresAfterRuling(scores: ScoreState, ruling: WrittenRuling): ScoreState {
   return {
     participantA:
@@ -915,6 +980,10 @@ function updatedScoresAfterRuling(scores: ScoreState, ruling: WrittenRuling): Sc
       scores.participantB +
       (ruling.askerRole === "participant_b" ? ruling.askerDelta : ruling.answererDelta),
   };
+}
+
+async function persistManifest(state: MatchState): Promise<void> {
+  await fs.writeFile(state.manifestPath, renderManifest(state), "utf8");
 }
 
 async function writeFinalScoreboard(state: MatchState): Promise<{
@@ -929,7 +998,7 @@ async function writeFinalScoreboard(state: MatchState): Promise<{
   const scoreboardPath = path.join(finalDir, "scoreboard.md");
   const result = finalResult(state);
   await fs.writeFile(scoreboardPath, renderScoreboard(state), "utf8");
-  await fs.writeFile(state.manifestPath, renderManifest(state), "utf8");
+  await persistManifest(state);
   return {
     matchDir: state.matchDir,
     scoreboardPath,
@@ -1105,11 +1174,17 @@ function finalResult(state: MatchState): string {
 }
 
 function renderManifest(state: MatchState): string {
+  const latestCompletedTurn = state.history.at(-1)?.turn ?? 0;
+  const nextScheduledTurn = state.currentTurn <= state.turnLimit ? String(state.currentTurn) : "none";
   return [
     "# AI Battle Manifest",
     "",
     `- Match ID: \`${state.matchId}\``,
     `- Battle repo: \`${state.battleRepo}\``,
+    `- Scratch root: \`${state.scratchRoot}\``,
+    `- Participant A workspace: \`${state.participantAWorkspaceDir}\``,
+    `- Participant B workspace: \`${state.participantBWorkspaceDir}\``,
+    `- Judge workspace: \`${state.judgeWorkspaceDir}\``,
     `- Rules source: \`${state.rulesPath}\``,
     `- Participant A: \`${state.participantAName}\``,
     `- Participant B: \`${state.participantBName}\``,
@@ -1119,7 +1194,8 @@ function renderManifest(state: MatchState): string {
     `- Standard turns: \`${state.standardTurns}\``,
     `- Sudden-death turns: \`${state.suddenDeathTurns}\``,
     `- Current phase: \`${formatPhaseLabel(state.phase)}\``,
-    `- Current turn: \`${Math.min(state.currentTurn, state.turnLimit)}\``,
+    `- Latest completed turn: \`${latestCompletedTurn}\``,
+    `- Next scheduled turn: \`${nextScheduledTurn}\``,
     `- Current score: \`${formatScore(state.scores, state.participantAName, state.participantBName)}\``,
     `- Result if stopped now: \`${finalResult(state)}\``,
   ].join("\n");
