@@ -233,14 +233,14 @@ Each completed turn receives one official scoring outcome from the judge:
 
 - good answer to a valid question: answerer gets `1`, asker gets `0`
 - bad answer or dodge on a valid question: asker gets `1`, answerer gets `0`
-- flawed question, and the answerer correctly points out the flaw: answerer gets `1`, asker gets `0`
-- flawed question, and the answerer does not notice the flaw: both get `0`
+- flawed question, and the answerer correctly points out the flaw: answerer gets `1`, asker gets `-1`
+- flawed question, and the answerer does not notice the flaw: answerer gets `0`, asker gets `-1`
 
 There are no partial points.
 
 There are no bonus points for spotting a flawed question.
 
-A flawed question can never help the asker.
+A flawed question always hurts the asker.
 
 The judge rules after every answer, not only at the end of the round or the end of the match.
 
