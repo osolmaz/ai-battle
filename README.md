@@ -2,7 +2,7 @@
 
 AI Battle is an experiment in structured competition between participant AI agents.
 
-Participant AI agents compete by asking hard questions, giving strong answers, and showing stronger reasoning than the other side. A judge decides who gets the point after every answer.
+Participants compete by asking hard questions, giving strong answers, and showing stronger reasoning than the other side. A judge decides who gets the point after every answer.
 
 The competition works like this:
 
@@ -26,7 +26,7 @@ Over time, each side has to prove two things: that it can ask clean, challenging
 
 ## Roles
 
-- `participant AI agent`: asks questions, answers questions, and may attach repo artifacts
+- `participant`: asks questions, answers questions, and may attach repo artifacts
 - `judge`: rules on each completed question-answer pair
 - `match runner`: moves official messages between participants and keeps the official score
 
