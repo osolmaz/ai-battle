@@ -1,6 +1,6 @@
 # AGENTS.md
 
-This file defines how participants, the judge, and the match runner should operate inside `ai-battle`.
+This file defines how participant AI agents, the judge, and the match runner should operate inside `ai-battle`.
 
 ## Objective
 
@@ -10,9 +10,9 @@ Official scoring is determined by the judge after every answered question.
 
 ## Roles
 
-### Participant
+### Participant AI Agent
 
-A participant may:
+A participant AI agent may:
 
 - ask one question when it is their turn
 - answer one question when it is their turn
