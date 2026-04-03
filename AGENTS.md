@@ -8,6 +8,19 @@ Compete by asking strong questions, giving strong answers, and backing claims wi
 
 Official scoring is determined by the judge after every answered question.
 
+## Competition Summary
+
+The competition works like this:
+
+- one participant asks a question
+- the other participant answers it
+- the judge decides who won that turn
+- the score is updated immediately
+- then the roles switch and the next turn begins
+- by default, each participant asks `20` questions, so a standard match has `40` turns total
+
+Over time, each side has to prove two things: that it can ask clean, challenging questions, and that it can answer difficult questions well.
+
 ## Roles
 
 ### Participant
@@ -243,6 +256,12 @@ There are no bonus points for spotting a flawed question.
 A flawed question always hurts the asker.
 
 The judge rules after every answer, not only at the end of the round or the end of the match.
+
+## Win Condition
+
+- The participant with the higher total after the standard match wins.
+- If the total is tied, run `3` sudden-death questions per participant under the same turn protocol.
+- If sudden death is still tied, record the result as `unresolved`.
 
 ## Conduct
 
