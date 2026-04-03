@@ -76,53 +76,101 @@ One round contains two turns, so each participant answers once per round.
 
 ## Turn Protocol
 
-For each turn, the sequence is:
+Assume `Participant A` starts.
 
-1. The match runner sends an ask prompt to the current asker.
-   The prompt includes the current score and the latest ruling.
-2. The asker returns one question.
-3. The match runner sends an answer prompt to the current answerer.
-   The prompt includes the question, the current score, and the latest ruling.
-4. The answerer returns one answer and any artifact links or file paths.
-5. The match runner sends the completed question-answer pair to the judge.
-6. The judge returns a ruling immediately.
-7. The match runner updates the official score.
-8. The match runner sends the ruling and the updated score to both participants.
-9. Roles switch for the next turn.
+### Turn 1
+
+1. `Participant A` receives: `ask_now`
+   Includes: turn number, current score, rules, latest ruling if any.
+2. `Participant B` receives: `wait`
+   Includes: current score.
+3. `Judge` receives: `match_state`
+   Includes: rules, scoring rubric, current score.
+4. `Participant B` receives: `answer_now`
+   Includes: `Participant A`'s question, current score.
+5. `Judge` receives: `judge_now`
+   Includes:
+   - asker = `Participant A`
+   - answerer = `Participant B`
+   - question
+   - answer
+   - artifact links if any
+   - score before this turn
+6. `Participant A` receives: `ruling`
+   Includes: who got the point, short reason, updated score.
+7. `Participant B` receives: same `ruling`.
+
+### Turn 2
+
+8. `Participant B` receives: `ask_now`
+   Includes: updated score, latest ruling.
+9. `Participant A` receives: `answer_now`
+   Includes: `Participant B`'s question, current score.
+10. `Judge` receives: `judge_now`
+    Includes:
+    - asker = `Participant B`
+    - answerer = `Participant A`
+    - question
+    - answer
+    - artifact links if any
+    - score before this turn
+11. `Participant A` receives: `ruling`
+    Includes: who got the point, short reason, updated score.
+12. `Participant B` receives: same `ruling`.
+
+Then repeat.
+
+So the pattern is always:
+
+- one participant receives `ask_now`
+- the other participant receives `answer_now`
+- the judge receives `judge_now`
+- both participants receive `ruling`
 
 On the last turn of the match, the judge still rules in the same way, but no new question is started after the ruling.
 
 ## What Participants Receive
 
-When it is your turn to ask, you should receive:
+`ask_now` should include:
 
-- notice that it is your turn
-- the current official score
-- the latest ruling
+- turn number when relevant
+- current official score
+- rules when relevant
+- latest ruling if any
 
-When it is your turn to answer, you should receive:
+`wait` should include:
 
-- the question you must answer
-- the current official score
-- the latest ruling
+- current official score
 
-After every judged turn, both participants should receive:
+`answer_now` should include:
 
-- the ruling
-- the short reason
-- the updated official score
+- the question to answer
+- current official score
+- latest ruling
 
 ## What The Judge Receives
 
-For each turn, the judge should receive:
+`match_state` should include:
 
-- the identity of the asker
-- the identity of the answerer
-- the question
-- the answer
+- rules
+- scoring rubric
+- current official score
+
+`judge_now` should include:
+
+- asker
+- answerer
+- question
+- answer
 - artifact links or file paths when relevant
-- the score before the turn
-- the scoring rules
+- score before the turn
+- scoring rules
+
+`ruling` should include:
+
+- who got the point
+- short reason
+- updated official score
 
 ## Question Rules
 
