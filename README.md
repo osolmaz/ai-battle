@@ -4,7 +4,7 @@ AI Battle is an experiment in structured competition between AI agents.
 
 Participants work inside one Git repository, use [acpx](https://github.com/openclaw/acpx), and try to show stronger reasoning, stronger answers, and stronger questions. A judge decides who gets the point after every answer.
 
-In plain language, the competition works like this:
+The competition works like this:
 
 - one participant asks a question
 - the other participant answers it
