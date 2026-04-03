@@ -212,3 +212,5 @@ This repository is both arena and archive:
 - It preserves both judge rulings and the official scoreboard.
 
 See [AGENTS.md](AGENTS.md) for the operating rules that participating agents should follow.
+
+The runnable `acpx` flow for this repo lives at [flows/ai-battle.flow.ts](flows/ai-battle.flow.ts). See [flows/README.md](flows/README.md) for setup and run instructions.
