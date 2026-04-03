@@ -25,7 +25,7 @@ The judge may:
 
 - review one completed question-answer pair at a time
 - decide who gets the point for that turn
-- mark an answer as sufficient, partial, dodged, or wrong
+- decide whether the answer was good, bad, or a dodge
 - mark a question as invalid, ambiguous, or unanswerable as written
 - provide a short reason for the ruling
 
@@ -87,12 +87,14 @@ Assume `Participant A` starts.
 3. `Judge` receives: `match_state`
    Includes: rules, scoring rubric, current score.
 4. `Participant B` receives: `answer_now`
-   Includes: `Participant A`'s question, current score.
+   Includes: `Participant A`'s public question, current score.
 5. `Judge` receives: `judge_now`
    Includes:
    - asker = `Participant A`
    - answerer = `Participant B`
    - question
+   - hidden answer key from `Participant A`
+   - why `Participant A` believes the question is valid
    - answer
    - artifact links if any
    - score before this turn
@@ -105,12 +107,14 @@ Assume `Participant A` starts.
 8. `Participant B` receives: `ask_now`
    Includes: updated score, latest ruling.
 9. `Participant A` receives: `answer_now`
-   Includes: `Participant B`'s question, current score.
+   Includes: `Participant B`'s public question, current score.
 10. `Judge` receives: `judge_now`
     Includes:
     - asker = `Participant B`
     - answerer = `Participant A`
     - question
+    - hidden answer key from `Participant B`
+    - why `Participant B` believes the question is valid
     - answer
     - artifact links if any
     - score before this turn
@@ -138,6 +142,17 @@ On the last turn of the match, the judge still rules in the same way, but no new
 - rules when relevant
 - latest ruling if any
 
+When replying to `ask_now`, the asker should send back:
+
+- one public question for the other participant
+- one hidden judge note that only the judge sees
+
+That hidden judge note should include:
+
+- the intended answer
+- why the question is valid
+- any repo files or evidence the judge may need
+
 `wait` should include:
 
 - current official score
@@ -147,6 +162,8 @@ On the last turn of the match, the judge still rules in the same way, but no new
 - the question to answer
 - current official score
 - latest ruling
+
+The answerer should not see the hidden judge note.
 
 ## What The Judge Receives
 
@@ -161,6 +178,8 @@ On the last turn of the match, the judge still rules in the same way, but no new
 - asker
 - answerer
 - question
+- hidden answer key from the asker
+- why the asker believes the question is valid
 - answer
 - artifact links or file paths when relevant
 - score before the turn
@@ -212,12 +231,16 @@ If a question is invalid, ambiguous, or impossible to answer as written, the ans
 
 Each completed turn receives one official scoring outcome from the judge:
 
-- `1` point to the answerer for a direct, correct, and sufficient answer
-- `1` point to the asker for an answer that is wrong, dodged, or unsupported
-- `0.5 / 0.5` when the answer is partial or the question is partially flawed
-- `1` point to the answerer when the question is invalid, ambiguous, or unanswerable as written and the flaw is identified correctly
+- good answer to a valid question: answerer gets `1`, asker gets `0`
+- bad answer or dodge on a valid question: asker gets `1`, answerer gets `0`
+- flawed question, and the answerer correctly points out the flaw: answerer gets `1`, asker gets `0`
+- flawed question, and the answerer does not notice the flaw: both get `0`
 
-Invalid questions do not create negative points by default. The normal outcome is forfeiture of that turn by the asker.
+There are no partial points.
+
+There are no bonus points for spotting a flawed question.
+
+A flawed question can never help the asker.
 
 The judge rules after every answer, not only at the end of the round or the end of the match.
 
