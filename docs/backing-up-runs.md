@@ -7,8 +7,11 @@ Use the repo for the competition record, not for `acpx` internals.
 For each run, keep:
 
 - `manifest.md`
+- `messages.jsonl`
+- `transcript.md`
 - `rules.md`
 - every `turn-*` directory
+  This includes the human-readable `*.md` files and the raw `*.json` submissions for questions, answers, and rulings.
 - `final/scoreboard.md`
 - `ARCHIVE.md` if present
 - `workspaces/` only if the scratch files are useful for reproducibility
@@ -50,6 +53,8 @@ Use names that make the role and adapter obvious. Keep these separate from `acpx
 
 For a Codex vs Claude run with Codex as judge, that means backing up all of these if they exist:
 
+- `messages.jsonl`
+- `transcript.md`
 - participant ACP session JSON and stream for Codex
 - participant ACP session JSON and stream for Claude
 - judge ACP session JSON and stream for Codex
@@ -62,11 +67,12 @@ For a Codex vs Claude run with Codex as judge, that means backing up all of thes
 To keep a run in the repo efficiently:
 
 1. Copy the competition record into `sessions/<battle-id>/`.
-2. Copy only the participant scratch files you want to preserve.
-3. Copy the ACP session logs into `acpx-sessions/`.
-4. Copy the native adapter session logs into `native-sessions/`.
-5. Do not copy the `runner/` directory.
-6. Commit the session directory.
+2. Keep `messages.jsonl` and `transcript.md`.
+3. Copy only the participant scratch files you want to preserve.
+4. Copy the ACP session logs into `acpx-sessions/`.
+5. Copy the native adapter session logs into `native-sessions/`.
+6. Do not copy the `runner/` directory.
+7. Commit the session directory.
 
 Example:
 

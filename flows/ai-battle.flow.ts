@@ -73,14 +73,35 @@ type TurnRecord = {
   askerName: string;
   answererName: string;
   questionPath: string;
+  questionJsonPath: string;
   judgeNotePath: string;
   answerPath: string;
+  answerJsonPath: string;
   rulingPath: string;
+  rulingJsonPath: string;
   outcome: TurnOutcome;
   reason: string;
   askerDelta: number;
   answererDelta: number;
   updatedScores: ScoreState;
+};
+
+type MatchMessageEventType =
+  | "question_submission"
+  | "answer_submission"
+  | "judge_ruling"
+  | "automatic_ruling";
+
+type MatchMessageEvent = {
+  eventId: string;
+  turn: number;
+  phase: MatchPhase;
+  speakerName: string;
+  speakerRole: "participant" | "judge" | "runner";
+  recipientName: string;
+  eventType: MatchMessageEventType;
+  body: string;
+  structuredData?: unknown;
 };
 
 type MatchState = {
@@ -95,6 +116,8 @@ type MatchState = {
   matchId: string;
   matchDir: string;
   manifestPath: string;
+  transcriptPath: string;
+  messageLogPath: string;
   participantAName: string;
   participantBName: string;
   judgeName: string;
@@ -144,6 +167,7 @@ type WrittenQuestion = {
   publicQuestion: string;
   judgeNote: JudgeNote;
   questionPath: string;
+  questionJsonPath: string;
   judgeNotePath: string;
 };
 
@@ -160,8 +184,10 @@ type WrittenAnswer = {
   flawClaim: string | null;
   artifactPaths: string[];
   questionPath: string;
+  questionJsonPath: string;
   judgeNotePath: string;
   answerPath: string;
+  answerJsonPath: string;
 };
 
 type WrittenRuling = {
@@ -177,9 +203,12 @@ type WrittenRuling = {
   askerDelta: number;
   answererDelta: number;
   rulingPath: string;
+  rulingJsonPath: string;
   questionPath: string;
+  questionJsonPath: string;
   judgeNotePath: string;
   answerPath: string;
+  answerJsonPath: string;
 };
 
 type AskTurnActionResult =
@@ -637,6 +666,8 @@ async function prepareMatch(input: AiBattleInput): Promise<PreparedMatch> {
   );
   const matchDir = path.join(sessionsDir, matchId);
   const manifestPath = path.join(matchDir, "manifest.md");
+  const transcriptPath = path.join(matchDir, "transcript.md");
+  const messageLogPath = path.join(matchDir, "messages.jsonl");
   const scratchMatchDir = path.join(scratchRoot, matchId);
   const participantAWorkspaceDir = path.join(scratchMatchDir, "participant-a");
   const participantBWorkspaceDir = path.join(scratchMatchDir, "participant-b");
@@ -663,6 +694,8 @@ async function prepareMatch(input: AiBattleInput): Promise<PreparedMatch> {
     matchId,
     matchDir,
     manifestPath,
+    transcriptPath,
+    messageLogPath,
     participantAName,
     participantBName,
     judgeName,
@@ -693,6 +726,7 @@ async function prepareMatch(input: AiBattleInput): Promise<PreparedMatch> {
   };
 
   await fs.writeFile(manifestPath, renderManifest(initialState), "utf8");
+  await initializeMessageArchive(initialState);
   return initialState;
 }
 
@@ -1507,17 +1541,23 @@ async function writeQuestion(
     selection.turnDir,
     `${fileStemForRole(selection.state, selection.askerRole)}-question.md`,
   );
+  const questionJsonPath = path.join(
+    selection.turnDir,
+    `${fileStemForRole(selection.state, selection.askerRole)}-question.json`,
+  );
   const judgeNotePath = path.join(
     selection.turnDir,
     `${fileStemForRole(selection.state, selection.askerRole)}-judge-note.md`,
   );
 
+  await fs.writeFile(judgeNotePath, renderJudgeNoteFile(selection, askResponse.judgeNote), "utf8");
+  await appendMessageEvent(selection.state, buildQuestionMessageEvent(selection, askResponse));
   await fs.writeFile(
     questionPath,
     renderQuestionFile(selection, askResponse.publicQuestion, selection.state.scores),
     "utf8",
   );
-  await fs.writeFile(judgeNotePath, renderJudgeNoteFile(selection, askResponse.judgeNote), "utf8");
+  await writeJsonFile(questionJsonPath, askResponse);
 
   return {
     route:
@@ -1531,6 +1571,7 @@ async function writeQuestion(
     publicQuestion: askResponse.publicQuestion,
     judgeNote: askResponse.judgeNote,
     questionPath,
+    questionJsonPath,
     judgeNotePath,
   };
 }
@@ -1591,8 +1632,14 @@ async function writeAnswer(
     turn.turnDir,
     `${fileStemForRole(turn.state, turn.answererRole)}-answer.md`,
   );
+  const answerJsonPath = path.join(
+    turn.turnDir,
+    `${fileStemForRole(turn.state, turn.answererRole)}-answer.json`,
+  );
 
+  await appendMessageEvent(turn.state, buildAnswerMessageEvent(turn, answerResponse));
   await fs.writeFile(answerPath, renderAnswerFile(turn, answerResponse), "utf8");
+  await writeJsonFile(answerJsonPath, answerResponse);
 
   return {
     state: turn.state,
@@ -1607,8 +1654,10 @@ async function writeAnswer(
     flawClaim: answerResponse.flawClaim,
     artifactPaths: answerResponse.artifactPaths,
     questionPath: turn.questionPath,
+    questionJsonPath: turn.questionJsonPath,
     judgeNotePath: turn.judgeNotePath,
     answerPath,
+    answerJsonPath,
   };
 }
 
@@ -1630,6 +1679,10 @@ async function writeAskForfeitTurn(
     selection.turnDir,
     `${fileStemForRole(selection.state, selection.askerRole)}-question.md`,
   );
+  const questionJsonPath = path.join(
+    selection.turnDir,
+    `${fileStemForRole(selection.state, selection.askerRole)}-question.json`,
+  );
   const judgeNotePath = path.join(
     selection.turnDir,
     `${fileStemForRole(selection.state, selection.askerRole)}-judge-note.md`,
@@ -1638,18 +1691,32 @@ async function writeAskForfeitTurn(
     selection.turnDir,
     `${fileStemForRole(selection.state, selection.answererRole)}-answer.md`,
   );
+  const answerJsonPath = path.join(
+    selection.turnDir,
+    `${fileStemForRole(selection.state, selection.answererRole)}-answer.json`,
+  );
 
   await fs.writeFile(
     questionPath,
     renderAskForfeitQuestionFile(selection, selection.state.scores, failure.reason),
     "utf8",
   );
+  await writeJsonFile(questionJsonPath, {
+    issuedByRunner: true,
+    status: "no_valid_submission",
+    reason: failure.reason,
+  });
   await fs.writeFile(
     judgeNotePath,
     renderAskForfeitJudgeNoteFile(selection, failure.reason),
     "utf8",
   );
   await fs.writeFile(answerPath, renderAskForfeitAnswerFile(selection), "utf8");
+  await writeJsonFile(answerJsonPath, {
+    issuedByRunner: true,
+    status: "not_required",
+    reason: "The asker forfeited before submitting a valid question.",
+  });
 
   return await writeSyntheticRuling({
     state: selection.state,
@@ -1661,8 +1728,10 @@ async function writeAskForfeitTurn(
     outcome: "asker_forfeit",
     reason: failure.reason,
     questionPath,
+    questionJsonPath,
     judgeNotePath,
     answerPath,
+    answerJsonPath,
   });
 }
 
@@ -1682,7 +1751,16 @@ async function writeAnswerForfeitTurn(
     turn.turnDir,
     `${fileStemForRole(turn.state, turn.answererRole)}-answer.md`,
   );
+  const answerJsonPath = path.join(
+    turn.turnDir,
+    `${fileStemForRole(turn.state, turn.answererRole)}-answer.json`,
+  );
   await fs.writeFile(answerPath, renderAnswerForfeitFile(turn, failure.reason), "utf8");
+  await writeJsonFile(answerJsonPath, {
+    issuedByRunner: true,
+    status: "no_valid_submission",
+    reason: failure.reason,
+  });
 
   return await writeSyntheticRuling({
     state: turn.state,
@@ -1694,8 +1772,10 @@ async function writeAnswerForfeitTurn(
     outcome: "answerer_forfeit",
     reason: failure.reason,
     questionPath: turn.questionPath,
+    questionJsonPath: turn.questionJsonPath,
     judgeNotePath: turn.judgeNotePath,
     answerPath,
+    answerJsonPath,
   });
 }
 
@@ -1709,34 +1789,21 @@ async function writeSyntheticRuling(options: {
   outcome: AutomaticOutcome;
   reason: string;
   questionPath: string;
+  questionJsonPath: string;
   judgeNotePath: string;
   answerPath: string;
+  answerJsonPath: string;
 }): Promise<WrittenRuling> {
   const { askerDelta, answererDelta } = scoreDeltasForOutcome(options.outcome);
   const rulingPath = path.join(options.turnDir, `${options.state.judgeFileStem}-ruling.md`);
+  const rulingJsonPath = path.join(options.turnDir, `${options.state.judgeFileStem}-ruling.json`);
 
-  await fs.writeFile(
-    rulingPath,
-    renderSyntheticRulingFile(options.state, {
-      turn: options.state.currentTurn,
-      phase: options.state.phase,
-      askerRole: options.askerRole,
-      answererRole: options.answererRole,
-      askerName: options.askerName,
-      answererName: options.answererName,
-      outcome: options.outcome,
-      reason: options.reason,
-      askerDelta,
-      answererDelta,
-      rulingPath,
-      questionPath: options.questionPath,
-      judgeNotePath: options.judgeNotePath,
-      answerPath: options.answerPath,
-    }),
-    "utf8",
-  );
-
-  return {
+  const structuredRuling = {
+    issuedByRunner: true,
+    outcome: options.outcome,
+    reason: options.reason,
+  };
+  const ruling: WrittenRuling = {
     state: options.state,
     turn: options.state.currentTurn,
     phase: options.state.phase,
@@ -1749,10 +1816,25 @@ async function writeSyntheticRuling(options: {
     askerDelta,
     answererDelta,
     rulingPath,
+    rulingJsonPath,
     questionPath: options.questionPath,
+    questionJsonPath: options.questionJsonPath,
     judgeNotePath: options.judgeNotePath,
     answerPath: options.answerPath,
+    answerJsonPath: options.answerJsonPath,
   };
+  await appendMessageEvent(
+    options.state,
+    buildAutomaticRulingMessageEvent(ruling),
+    advanceState(options.state, ruling),
+  );
+  await fs.writeFile(
+    rulingPath,
+    renderSyntheticRulingFile(options.state, ruling),
+    "utf8",
+  );
+  await writeJsonFile(rulingJsonPath, structuredRuling);
+  return ruling;
 }
 
 function judgePrompt(turn: WrittenAnswer): string {
@@ -1801,14 +1883,9 @@ async function writeRuling(turn: WrittenAnswer, rawJudgeResponse: unknown): Prom
   const judgeResponse = normalizeJudgeResponse(rawJudgeResponse);
   const { askerDelta, answererDelta } = scoreDeltasForOutcome(judgeResponse.outcome);
   const rulingPath = path.join(turn.turnDir, `${turn.state.judgeFileStem}-ruling.md`);
+  const rulingJsonPath = path.join(turn.turnDir, `${turn.state.judgeFileStem}-ruling.json`);
 
-  await fs.writeFile(
-    rulingPath,
-    renderRulingFile(turn, judgeResponse, askerDelta, answererDelta),
-    "utf8",
-  );
-
-  return {
+  const ruling: WrittenRuling = {
     state: turn.state,
     turn: turn.state.currentTurn,
     phase: turn.state.phase,
@@ -1821,10 +1898,25 @@ async function writeRuling(turn: WrittenAnswer, rawJudgeResponse: unknown): Prom
     askerDelta,
     answererDelta,
     rulingPath,
+    rulingJsonPath,
     questionPath: turn.questionPath,
+    questionJsonPath: turn.questionJsonPath,
     judgeNotePath: turn.judgeNotePath,
     answerPath: turn.answerPath,
+    answerJsonPath: turn.answerJsonPath,
   };
+  await appendMessageEvent(
+    turn.state,
+    buildJudgeRulingMessageEvent(ruling, judgeResponse),
+    advanceState(turn.state, ruling),
+  );
+  await fs.writeFile(
+    rulingPath,
+    renderRulingFile(turn, judgeResponse, askerDelta, answererDelta),
+    "utf8",
+  );
+  await writeJsonFile(rulingJsonPath, judgeResponse);
+  return ruling;
 }
 
 function rulingNotificationPrompt(ruling: WrittenRuling, recipientRole: MatchRole): string {
@@ -1865,9 +1957,12 @@ function advanceState(state: MatchState, ruling: WrittenRuling): MatchState {
     askerName: ruling.askerName,
     answererName: ruling.answererName,
     questionPath: ruling.questionPath,
+    questionJsonPath: ruling.questionJsonPath,
     judgeNotePath: ruling.judgeNotePath,
     answerPath: ruling.answerPath,
+    answerJsonPath: ruling.answerJsonPath,
     rulingPath: ruling.rulingPath,
+    rulingJsonPath: ruling.rulingJsonPath,
     outcome: ruling.outcome,
     reason: ruling.reason,
     askerDelta: ruling.askerDelta,
@@ -1906,6 +2001,7 @@ function advanceState(state: MatchState, ruling: WrittenRuling): MatchState {
 async function advanceTurn(state: MatchState, ruling: WrittenRuling): Promise<MatchState> {
   const nextState = advanceState(state, ruling);
   await persistManifest(nextState);
+  await persistTranscriptFromLog(nextState);
   return nextState;
 }
 
@@ -1924,6 +2020,53 @@ async function persistManifest(state: MatchState): Promise<void> {
   await fs.writeFile(state.manifestPath, renderManifest(state), "utf8");
 }
 
+async function initializeMessageArchive(state: MatchState): Promise<void> {
+  await fs.writeFile(state.messageLogPath, "", "utf8");
+  await persistTranscriptFromLog(state);
+}
+
+async function appendMessageEvent(
+  state: MatchState,
+  event: MatchMessageEvent,
+  transcriptState?: MatchState,
+): Promise<void> {
+  const existing = await readTextIfExists(state.messageLogPath);
+  const marker = `"eventId":"${event.eventId}"`;
+  if (!existing.includes(marker)) {
+    await fs.appendFile(state.messageLogPath, `${JSON.stringify(event)}\n`, "utf8");
+  }
+  await persistTranscriptFromLog(transcriptState ?? state);
+}
+
+async function persistTranscriptFromLog(state: MatchState): Promise<void> {
+  const events = parseMessageEvents(await readTextIfExists(state.messageLogPath));
+  await fs.writeFile(state.transcriptPath, renderTranscript(state, events), "utf8");
+}
+
+async function readTextIfExists(filePath: string): Promise<string> {
+  try {
+    return await fs.readFile(filePath, "utf8");
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") {
+      return "";
+    }
+    throw error;
+  }
+}
+
+function parseMessageEvents(raw: string): MatchMessageEvent[] {
+  return raw
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+    .map((line) => JSON.parse(line) as MatchMessageEvent);
+}
+
+async function writeJsonFile(filePath: string, value: unknown): Promise<void> {
+  await fs.writeFile(filePath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+}
+
 async function writeFinalScoreboard(state: MatchState): Promise<{
   matchDir: string;
   scoreboardPath: string;
@@ -1937,6 +2080,7 @@ async function writeFinalScoreboard(state: MatchState): Promise<{
   const result = finalResult(state);
   await fs.writeFile(scoreboardPath, renderScoreboard(state), "utf8");
   await persistManifest(state);
+  await persistTranscriptFromLog(state);
   return {
     matchDir: state.matchDir,
     scoreboardPath,
@@ -2135,6 +2279,172 @@ function finalResult(state: MatchState): string {
     : state.participantBName;
 }
 
+function buildQuestionMessageEvent(
+  selection: TurnSelection,
+  askResponse: AskResponse,
+): MatchMessageEvent {
+  return {
+    eventId: `${formatTurnDir(selection.state.currentTurn)}-${fileStemForRole(selection.state, selection.askerRole)}-question`,
+    turn: selection.state.currentTurn,
+    phase: selection.state.phase,
+    speakerName: selection.askerName,
+    speakerRole: "participant",
+    recipientName: `${selection.answererName} and ${selection.state.judgeName}`,
+    eventType: "question_submission",
+    body: [
+      `Question from ${selection.askerName} to ${selection.answererName}.`,
+      "",
+      "Public question:",
+      "",
+      askResponse.publicQuestion,
+      "",
+      "Hidden judge note:",
+      "",
+      `- Intended answer: ${askResponse.judgeNote.intendedAnswer}`,
+      `- Validity reason: ${askResponse.judgeNote.validityReason}`,
+      `- Evidence paths: ${formatPathListInline(askResponse.judgeNote.evidencePaths ?? [])}`,
+    ].join("\n"),
+    structuredData: askResponse,
+  };
+}
+
+function buildAnswerMessageEvent(
+  turn: WrittenQuestion,
+  answerResponse: AnswerResponse,
+): MatchMessageEvent {
+  return {
+    eventId: `${formatTurnDir(turn.state.currentTurn)}-${fileStemForRole(turn.state, turn.answererRole)}-answer`,
+    turn: turn.state.currentTurn,
+    phase: turn.state.phase,
+    speakerName: turn.answererName,
+    speakerRole: "participant",
+    recipientName: `${turn.askerName} and ${turn.state.judgeName}`,
+    eventType: "answer_submission",
+    body: [
+      `Answer from ${turn.answererName} to ${turn.askerName}.`,
+      "",
+      "Answer:",
+      "",
+      answerResponse.answer,
+      "",
+      `Flaw claim: ${answerResponse.flawClaim ?? "(none)"}`,
+      `Artifact paths: ${formatPathListInline(answerResponse.artifactPaths)}`,
+    ].join("\n"),
+    structuredData: answerResponse,
+  };
+}
+
+function buildJudgeRulingMessageEvent(
+  ruling: WrittenRuling,
+  judgeResponse: JudgeResponse,
+): MatchMessageEvent {
+  return {
+    eventId: `${formatTurnDir(ruling.turn)}-${ruling.state.judgeFileStem}-ruling`,
+    turn: ruling.turn,
+    phase: ruling.phase,
+    speakerName: ruling.state.judgeName,
+    speakerRole: "judge",
+    recipientName: `${ruling.askerName} and ${ruling.answererName}`,
+    eventType: "judge_ruling",
+    body: [
+      `Ruling for turn ${ruling.turn}.`,
+      "",
+      `Outcome: ${judgeResponse.outcome}`,
+      `Reason: ${judgeResponse.reason}`,
+      `Score change: ${ruling.askerName} ${formatSignedDelta(ruling.askerDelta)}, ${ruling.answererName} ${formatSignedDelta(ruling.answererDelta)}`,
+      `Score after turn: ${formatScore(updatedScoresAfterRuling(ruling.state.scores, ruling), ruling.state.participantAName, ruling.state.participantBName)}`,
+    ].join("\n"),
+    structuredData: judgeResponse,
+  };
+}
+
+function buildAutomaticRulingMessageEvent(ruling: WrittenRuling): MatchMessageEvent {
+  return {
+    eventId: `${formatTurnDir(ruling.turn)}-runner-automatic-ruling`,
+    turn: ruling.turn,
+    phase: ruling.phase,
+    speakerName: "match runner",
+    speakerRole: "runner",
+    recipientName: `${ruling.askerName} and ${ruling.answererName}`,
+    eventType: "automatic_ruling",
+    body: [
+      `Automatic ruling for turn ${ruling.turn}.`,
+      "",
+      `Outcome: ${ruling.outcome}`,
+      `Reason: ${ruling.reason}`,
+      `Score change: ${ruling.askerName} ${formatSignedDelta(ruling.askerDelta)}, ${ruling.answererName} ${formatSignedDelta(ruling.answererDelta)}`,
+      `Score after turn: ${formatScore(updatedScoresAfterRuling(ruling.state.scores, ruling), ruling.state.participantAName, ruling.state.participantBName)}`,
+    ].join("\n"),
+    structuredData: {
+      issuedByRunner: true,
+      outcome: ruling.outcome,
+      reason: ruling.reason,
+    },
+  };
+}
+
+function renderTranscript(state: MatchState, events: MatchMessageEvent[]): string {
+  const lines = [
+    "# Hearing Transcript",
+    "",
+    `- Match ID: \`${state.matchId}\``,
+    `- Participant A: \`${state.participantAName}\``,
+    `- Participant B: \`${state.participantBName}\``,
+    `- Judge: \`${state.judgeName}\``,
+    `- Current score: \`${formatScore(state.scores, state.participantAName, state.participantBName)}\``,
+    `- Latest completed turn: \`${state.history.at(-1)?.turn ?? 0}\``,
+    "",
+    "This file is generated by the flow from the per-turn messages that participants and the judge submitted.",
+    "",
+  ];
+
+  if (events.length === 0) {
+    lines.push("No participant or judge messages have been recorded yet.", "");
+    return `${lines.join("\n").trimEnd()}\n`;
+  }
+
+  let currentTurn: number | null = null;
+  for (const event of events) {
+    if (event.turn !== currentTurn) {
+      if (currentTurn !== null) {
+        lines.push("");
+      }
+      lines.push(`## Turn ${event.turn} (${formatPhaseLabel(event.phase)})`, "");
+      currentTurn = event.turn;
+    }
+
+    lines.push(`### ${transcriptHeading(event)}`, "");
+    lines.push(event.body, "");
+
+    if (event.structuredData !== undefined) {
+      lines.push("```json", JSON.stringify(event.structuredData, null, 2), "```", "");
+    }
+  }
+
+  return `${lines.join("\n").trimEnd()}\n`;
+}
+
+function transcriptHeading(event: MatchMessageEvent): string {
+  switch (event.eventType) {
+    case "question_submission":
+      return `${event.speakerName} question package`;
+    case "answer_submission":
+      return `${event.speakerName} answer package`;
+    case "judge_ruling":
+      return `${event.speakerName} ruling`;
+    case "automatic_ruling":
+      return "Automatic ruling from the match runner";
+  }
+}
+
+function formatSignedDelta(value: number): string {
+  return value > 0 ? `+${value}` : String(value);
+}
+
+function formatPathListInline(paths: string[]): string {
+  return paths.length > 0 ? paths.map((entry) => `\`${entry}\``).join(", ") : "(none)";
+}
+
 function renderManifest(state: MatchState): string {
   const latestCompletedTurn = state.history.at(-1)?.turn ?? 0;
   const nextScheduledTurn =
@@ -2149,6 +2459,8 @@ function renderManifest(state: MatchState): string {
     `- Participant B workspace: \`${state.participantBWorkspaceDir}\``,
     `- Judge workspace: \`${state.judgeWorkspaceDir}\``,
     `- Rules source: \`${state.rulesPath}\``,
+    `- Transcript: \`${state.transcriptPath}\``,
+    `- Message log: \`${state.messageLogPath}\``,
     `- Participant A: \`${state.participantAName}\``,
     `- Participant B: \`${state.participantBName}\``,
     `- Judge: \`${state.judgeName}\``,
