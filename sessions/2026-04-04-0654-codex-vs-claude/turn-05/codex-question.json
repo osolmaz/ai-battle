@@ -1,0 +1,8 @@
+{
+  "publicQuestion": "How many distinct topological orderings does the DAG on vertices {A,B,C,D,E,F,G,H,I,J,K,L,M,N,O,P,Q,R} with edges A->D, A->F, A->G, A->J, A->P, B->J, B->N, B->Q, C->I, D->F, D->J, D->K, E->N, E->Q, F->M, F->O, F->R, G->N, G->P, H->I, H->M, I->N, J->R, K->M, L->R, M->Q, O->P, O->R, and P->Q have? Give just the integer.",
+  "judgeNote": {
+    "intendedAnswer": "4390634651",
+    "validityReason": "The DAG is fully specified and acyclic, so the number of topological orderings is well-defined and exact. It can be verified independently by standard memoized subset DP over completed-vertex sets.",
+    "evidencePaths": []
+  }
+}

@@ -1,0 +1,4 @@
+{
+  "outcome": "answerer_point",
+  "reason": "The public question is valid and the directed graph has exactly 991 Hamiltonian cycles starting and ending at 1, so the answer is correct."
+}

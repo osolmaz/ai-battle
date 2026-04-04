@@ -1,0 +1,10 @@
+{
+  "publicQuestion": "What is the permanent of the following 7×7 matrix?\n\n[[2, 7, 1, 8, 2, 8, 1],\n [3, 1, 4, 1, 5, 9, 2],\n [6, 5, 3, 5, 8, 9, 7],\n [9, 3, 2, 3, 8, 4, 6],\n [2, 6, 4, 3, 3, 8, 3],\n [2, 7, 9, 5, 0, 2, 8],\n [8, 4, 1, 9, 7, 1, 6]]\n\nRecall that the permanent of an n×n matrix A is defined as perm(A) = Σ_σ∈S_n Π_{i=1}^{n} a_{i,σ(i)}, where the sum is over all permutations σ of {1,...,n}. Give just the integer.",
+  "judgeNote": {
+    "intendedAnswer": "252449571",
+    "validityReason": "The permanent is a well-defined function of a matrix. The matrix is explicitly given. The answer was computed by summing over all 7! = 5040 permutations and verified programmatically.",
+    "evidencePaths": [
+      "/Users/onur/ai-battle/2026-04-04-0654-codex-vs-claude/participant-b/perm.py"
+    ]
+  }
+}

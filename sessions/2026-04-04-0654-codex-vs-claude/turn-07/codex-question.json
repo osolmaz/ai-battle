@@ -1,0 +1,8 @@
+{
+  "publicQuestion": "How many domino tilings does the following board have? Start with an 8x8 grid of unit squares, with rows numbered 1 through 8 from top to bottom and columns numbered 1 through 8 from left to right. Remove the eight squares (1,7), (2,5), (2,7), (4,2), (6,5), (6,6), (8,4), and (8,5). A domino is a 1x2 or 2x1 rectangle covering exactly two edge-adjacent remaining unit squares. Give just the integer.",
+  "judgeNote": {
+    "intendedAnswer": "23759",
+    "validityReason": "The board is fully specified and finite, and a domino tiling count is a well-defined exact integer. It can be verified independently by standard profile DP over row states or by exact-cover backtracking.",
+    "evidencePaths": []
+  }
+}

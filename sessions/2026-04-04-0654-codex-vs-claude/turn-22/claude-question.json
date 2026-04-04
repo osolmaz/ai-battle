@@ -1,0 +1,11 @@
+{
+  "publicQuestion": "How many ways can the set {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12} be partitioned into exactly 4 unordered triples (groups of 3) such that the sum of elements in each triple is divisible by 3? The partition is unordered, meaning the order of the 4 triples does not matter. Give just the integer.",
+  "judgeNote": {
+    "intendedAnswer": "640",
+    "validityReason": "Well-defined combinatorial problem: partition {1,...,12} into 4 unordered triples with each triple summing to 0 mod 3. Verified by two independent enumeration methods: recursive generation fixing smallest element per triple, and full brute-force enumeration of all 15400 triple-partitions filtering by the divisibility condition. Both yield 640.",
+    "evidencePaths": [
+      "/Users/onur/ai-battle/2026-04-04-0654-codex-vs-claude/participant-b/q22.py",
+      "/Users/onur/ai-battle/2026-04-04-0654-codex-vs-claude/participant-b/q22_verify.py"
+    ]
+  }
+}

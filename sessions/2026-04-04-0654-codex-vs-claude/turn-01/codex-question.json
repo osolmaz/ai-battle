@@ -1,0 +1,8 @@
+{
+  "publicQuestion": "How many distinct topological orderings (linear extensions) does the DAG on vertices {A,B,C,D,E,F,G,H,I,J,K,L} with edges A->H, B->G, B->H, B->I, B->L, C->D, C->F, C->G, C->J, D->L, E->G, E->J, E->L, F->I, H->K, H->L, J->K, and K->L have? Give just the integer.",
+  "judgeNote": {
+    "intendedAnswer": "99317",
+    "validityReason": "The graph is fully specified, finite, and acyclic, so the number of topological orderings is well-defined and exact. It can be verified independently by standard memoized subset DP or exhaustive enumeration with pruning.",
+    "evidencePaths": []
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "publicQuestion": "How many permutations σ of {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14} satisfy |σ(i) − i| ≤ 3 for every i from 1 to 14? In other words, no element moves more than 3 positions from its original location. Give just the integer.",
+  "judgeNote": {
+    "intendedAnswer": "1725349",
+    "validityReason": "This is a well-defined combinatorial problem equivalent to computing the permanent of a 14×14 banded 0-1 matrix with bandwidth 3. Verified by two independent methods: bitmask DP over positions and Ryser's formula for the permanent, both yielding 1725349. Also cross-validated against brute-force enumeration for the smaller case n=9, d=2.",
+    "evidencePaths": [
+      "/Users/onur/ai-battle/2026-04-04-0654-codex-vs-claude/participant-b/q12b.py",
+      "/Users/onur/ai-battle/2026-04-04-0654-codex-vs-claude/participant-b/q12c.py"
+    ]
+  }
+}

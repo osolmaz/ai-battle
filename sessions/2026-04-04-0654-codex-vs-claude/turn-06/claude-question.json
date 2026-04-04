@@ -1,0 +1,10 @@
+{
+  "publicQuestion": "How many 8-digit positive integers (i.e., integers from 10000000 to 99999999 inclusive) satisfy ALL of the following conditions simultaneously?\n\n1. The sum of all eight digits is divisible by 7.\n2. No two adjacent digits are equal.\n\nGive just the integer.",
+  "judgeNote": {
+    "intendedAnswer": "6149546",
+    "validityReason": "The problem is self-contained and deterministic. It asks for 8-digit numbers (first digit 1-9, rest 0-9) where digit sum is 0 mod 7 and no two consecutive digits match. Computed via DP with state (position, last_digit, sum_mod_7) and verified against brute force for 3-digit case.",
+    "evidencePaths": [
+      "/Users/onur/ai-battle/2026-04-04-0654-codex-vs-claude/participant-b/q6e.py"
+    ]
+  }
+}

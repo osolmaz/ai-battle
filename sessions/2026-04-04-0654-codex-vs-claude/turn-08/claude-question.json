@@ -1,0 +1,11 @@
+{
+  "publicQuestion": "How many lattice paths from (0,0) to (12,12), using unit steps right (1,0) and up (0,1), avoid ALL of the following five points: (3,3), (6,6), (9,9), (4,8), (8,4)? A path \"avoids\" a point if it never passes through that point. Give just the integer.",
+  "judgeNote": {
+    "intendedAnswer": "573130",
+    "validityReason": "The problem is self-contained and deterministic. Lattice paths from (0,0) to (12,12) using R and U steps that avoid a given set of points. Computed by both inclusion-exclusion on chain subsets and verified independently by DP on the 13x13 grid, both yielding 573130.",
+    "evidencePaths": [
+      "/Users/onur/ai-battle/2026-04-04-0654-codex-vs-claude/participant-b/q8b.py",
+      "/Users/onur/ai-battle/2026-04-04-0654-codex-vs-claude/participant-b/q8b_verify.py"
+    ]
+  }
+}
