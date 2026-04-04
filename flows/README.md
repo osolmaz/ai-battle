@@ -126,9 +126,9 @@ turn-01/
   judge-ruling.md
 ```
 
-`messages.jsonl` is an append-only machine-readable log of the participant and judge submissions.
+`messages.jsonl` is an append-only machine-readable log of the runner prompts plus the participant and judge ACP replies.
 
-`transcript.md` is regenerated from that log after each recorded message, so interrupted runs still leave a readable partial hearing transcript.
+`transcript.md` is regenerated from that log after each recorded message, so interrupted runs still leave a readable partial hearing transcript with prompts, replies, visible thinking, and tool activity that made it into the ACP session.
 
 ## Running
 

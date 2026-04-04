@@ -2,6 +2,12 @@
 
 import fs from "node:fs/promises";
 import path from "node:path";
+import {
+  buildAgentReplyEvent,
+  buildRunnerNoticeEvent,
+  buildRunnerPromptEvent,
+  renderTranscript,
+} from "../lib/hearing-transcript.js";
 
 async function main() {
   const matchDirArg = process.argv[2];
@@ -23,7 +29,7 @@ async function main() {
     .map((entry) => entry.name)
     .sort();
 
-  const events = [];
+  const turnSummaries = [];
   let latestScore = `${participantAName} 0, ${participantBName} 0`;
   let latestTurn = 0;
 
@@ -53,7 +59,9 @@ async function main() {
     const phase = parsePhase(stripCode(questionFields["Phase"] ?? rulingFields["Phase"]));
     const turn = Number(stripCode(questionFields["Turn"] ?? rulingFields["Turn"]));
     const askerName = stripCode(questionFields["Asker"] ?? rulingFields["Asker"]);
-    const answererName = stripCode(questionFields["Answerer"] ?? answerFields["Asked by"] ?? rulingFields["Answerer"]);
+    const answererName = stripCode(
+      questionFields["Answerer"] ?? answerFields["Asked by"] ?? rulingFields["Answerer"],
+    );
     const questionText = extractSection(questionMd, "Question");
     const intendedAnswer = extractSection(judgeNoteMd, "Intended Answer");
     const validityReason = extractSection(judgeNoteMd, "Validity Reason");
@@ -64,8 +72,6 @@ async function main() {
     const outcome = stripCode(rulingFields["Outcome"]);
     const reason = extractSection(rulingMd, "Reason");
     const scoreAfterTurn = stripCode(rulingFields["Score after turn"]);
-    const askerDelta = Number(stripCode(rulingFields["Asker delta"]));
-    const answererDelta = Number(stripCode(rulingFields["Answerer delta"]));
     const issuedByRunner = stripCode(rulingFields["Issued by runner"] ?? "") === "true";
 
     latestScore = scoreAfterTurn || latestScore;
@@ -111,92 +117,266 @@ async function main() {
       "utf8",
     );
 
-    events.push({
-      eventId: `${turnDirName}-${roleStemFromFile(questionMdName, "question")}-question`,
+    turnSummaries.push({
       turn,
       phase,
-      speakerName: askerName,
-      speakerRole: "participant",
-      recipientName: `${answererName} and ${judgeName}`,
-      eventType: "question_submission",
-      body: [
-        `Question from ${askerName} to ${answererName}.`,
-        "",
-        "Public question:",
-        "",
-        questionText,
-        "",
-        "Hidden judge note:",
-        "",
-        `- Intended answer: ${intendedAnswer}`,
-        `- Validity reason: ${validityReason}`,
-        `- Evidence paths: ${formatPathListInline(evidencePaths)}`,
-      ].join("\n"),
-      structuredData: questionJson,
+      askerName,
+      answererName,
+      outcome,
+      reason,
+      issuedByRunner,
     });
+  }
 
-    events.push({
-      eventId: `${turnDirName}-${roleStemFromFile(answerMdName, "answer")}-answer`,
-      turn,
-      phase,
-      speakerName: answererName,
-      speakerRole: "participant",
-      recipientName: `${askerName} and ${judgeName}`,
-      eventType: "answer_submission",
-      body: [
-        `Answer from ${answererName} to ${askerName}.`,
-        "",
-        "Answer:",
-        "",
-        answerText,
-        "",
-        `Flaw claim: ${normalizeOptionalText(flawClaimText) ?? "(none)"}`,
-        `Artifact paths: ${formatPathListInline(artifactPaths)}`,
-      ].join("\n"),
-      structuredData: answerJson,
-    });
+  const sessionDir = path.join(matchDir, "acpx-sessions");
+  const participantASession = await readSessionMessages(
+    path.join(sessionDir, `${participantAName}-participant.session.json`),
+  );
+  const participantBSession = await readSessionMessages(
+    path.join(sessionDir, `${participantBName}-participant.session.json`),
+  );
+  const judgeSession = await readSessionMessages(
+    path.join(sessionDir, `${judgeName}-judge.session.json`),
+  );
 
-    events.push({
-      eventId: `${turnDirName}-${roleStemFromFile(rulingMdName, "ruling")}-ruling`,
-      turn,
-      phase,
-      speakerName: issuedByRunner ? "match runner" : judgeName,
-      speakerRole: issuedByRunner ? "runner" : "judge",
-      recipientName: `${askerName} and ${answererName}`,
-      eventType: issuedByRunner ? "automatic_ruling" : "judge_ruling",
-      body: [
-        `${issuedByRunner ? "Automatic ruling" : `Ruling`} for turn ${turn}.`,
-        "",
-        `Outcome: ${outcome}`,
-        `Reason: ${reason}`,
-        `Score change: ${askerName} ${formatSignedDelta(askerDelta)}, ${answererName} ${formatSignedDelta(answererDelta)}`,
-        `Score after turn: ${scoreAfterTurn}`,
-      ].join("\n"),
-      structuredData: rulingJson,
-    });
+  const participantAExchanges = buildPromptExchanges(participantASession);
+  const participantBExchanges = buildPromptExchanges(participantBSession);
+  const judgeExchanges = buildPromptExchanges(judgeSession);
+
+  let eventCounter = 1;
+  const nextEventId = (prefix) => `${prefix}-${String(eventCounter++).padStart(6, "0")}`;
+  const events = [];
+
+  const appendExchange = (exchange, speakerName, speakerRole, turn, phase, promptKind) => {
+    if (!exchange) {
+      return;
+    }
+    const promptEventId = nextEventId("prompt");
+    events.push(
+      buildRunnerPromptEvent({
+        eventId: promptEventId,
+        turn,
+        phase,
+        recipientName: speakerName,
+        promptKind,
+        body: exchange.promptText,
+      }),
+    );
+    if (exchange.agentMessage) {
+      events.push(
+        buildAgentReplyEvent({
+          eventId: nextEventId("reply"),
+          turn,
+          phase,
+          speakerName,
+          speakerRole,
+          promptEventId,
+          promptKind,
+          agentMessage: exchange.agentMessage,
+        }),
+      );
+    }
+  };
+
+  appendExchange(
+    participantAExchanges.shift(),
+    participantAName,
+    "participant",
+    0,
+    "standard",
+    "rules briefing",
+  );
+  appendExchange(
+    participantBExchanges.shift(),
+    participantBName,
+    "participant",
+    0,
+    "standard",
+    "rules briefing",
+  );
+  appendExchange(
+    judgeExchanges.shift(),
+    judgeName,
+    "judge",
+    0,
+    "standard",
+    "rules briefing",
+  );
+
+  for (const summary of turnSummaries) {
+    const askerIsA = summary.askerName === participantAName;
+    const askerExchanges = askerIsA ? participantAExchanges : participantBExchanges;
+    const answererExchanges = askerIsA ? participantBExchanges : participantAExchanges;
+
+    appendExchange(
+      askerExchanges.shift(),
+      summary.askerName,
+      "participant",
+      summary.turn,
+      summary.phase,
+      "asking turn",
+    );
+    appendExchange(
+      answererExchanges.shift(),
+      summary.answererName,
+      "participant",
+      summary.turn,
+      summary.phase,
+      "wait notice",
+    );
+    appendExchange(
+      answererExchanges.shift(),
+      summary.answererName,
+      "participant",
+      summary.turn,
+      summary.phase,
+      "answering turn",
+    );
+
+    if (!summary.issuedByRunner) {
+      appendExchange(
+        judgeExchanges.shift(),
+        judgeName,
+        "judge",
+        summary.turn,
+        summary.phase,
+        "judge turn",
+      );
+    } else {
+      events.push(
+        buildRunnerNoticeEvent({
+          eventId: nextEventId("notice"),
+          turn: summary.turn,
+          phase: summary.phase,
+          title: "automatic ruling",
+          body: [
+            `Automatic ruling for turn ${summary.turn}.`,
+            "",
+            `Outcome: ${summary.outcome}`,
+            `Reason: ${summary.reason}`,
+          ].join("\n"),
+          structuredData: {
+            issuedByRunner: true,
+            outcome: summary.outcome,
+            reason: summary.reason,
+          },
+        }),
+      );
+    }
+
+    appendExchange(
+      askerExchanges.shift(),
+      summary.askerName,
+      "participant",
+      summary.turn,
+      summary.phase,
+      "ruling notice",
+    );
+    appendExchange(
+      answererExchanges.shift(),
+      summary.answererName,
+      "participant",
+      summary.turn,
+      summary.phase,
+      "ruling notice",
+    );
+  }
+
+  const finalScoreboardPath = path.join(matchDir, "final", "scoreboard.md");
+  const finalScoreboardExists = await fileExists(finalScoreboardPath);
+  if (finalScoreboardExists) {
+    const scoreboard = await fs.readFile(finalScoreboardPath, "utf8");
+    const result = stripCode(parseBulletFields(scoreboard)["Result"]);
+    events.push(
+      buildRunnerNoticeEvent({
+        eventId: nextEventId("notice"),
+        turn: latestTurn,
+        phase: turnSummaries.at(-1)?.phase ?? "standard",
+        title: "final result",
+        body: [
+          "Final scoreboard written.",
+          "",
+          `Result: ${result}`,
+          `Final score: ${latestScore}`,
+          `Scoreboard: ${finalScoreboardPath}`,
+        ].join("\n"),
+        structuredData: {
+          result,
+          scoreboardPath: finalScoreboardPath,
+        },
+      }),
+    );
   }
 
   const messageLogPath = path.join(matchDir, "messages.jsonl");
   await fs.writeFile(
     messageLogPath,
-    `${events.map((event) => JSON.stringify(event)).join("\n")}\n`,
+    events.length > 0 ? `${events.map((event) => JSON.stringify(event)).join("\n")}\n` : "",
     "utf8",
   );
 
   const transcriptPath = path.join(matchDir, "transcript.md");
   await fs.writeFile(
     transcriptPath,
-    renderTranscript({
-      matchId,
-      participantAName,
-      participantBName,
-      judgeName,
-      currentScore: latestScore,
-      latestCompletedTurn: latestTurn,
+    renderTranscript(
+      {
+        matchId,
+        participantAName,
+        participantBName,
+        judgeName,
+        currentScore: latestScore,
+        latestCompletedTurn: latestTurn,
+      },
       events,
-    }),
+    ),
     "utf8",
   );
+}
+
+async function readSessionMessages(filePath) {
+  const raw = JSON.parse(await fs.readFile(filePath, "utf8"));
+  return Array.isArray(raw.messages) ? raw.messages : [];
+}
+
+function buildPromptExchanges(messages) {
+  const exchanges = [];
+  let pendingUser = null;
+
+  for (const message of messages) {
+    if (message?.User) {
+      pendingUser = {
+        promptText: collectUserText(message.User),
+      };
+      continue;
+    }
+    if (message?.Agent) {
+      exchanges.push({
+        promptText: pendingUser?.promptText ?? "(prompt unavailable)",
+        agentMessage: message.Agent,
+      });
+      pendingUser = null;
+    }
+  }
+
+  return exchanges;
+}
+
+function collectUserText(userMessage) {
+  const content = Array.isArray(userMessage?.content) ? userMessage.content : [];
+  return content
+    .map((part) => (part && typeof part.Text === "string" ? part.Text : ""))
+    .filter((text) => text.trim().length > 0)
+    .join("\n\n")
+    .trim();
+}
+
+async function fileExists(filePath) {
+  try {
+    await fs.access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function requireSingle(files, pattern) {
@@ -255,78 +435,6 @@ function normalizeOptionalText(value) {
 
 function parsePhase(label) {
   return label === "sudden death" ? "sudden_death" : "standard";
-}
-
-function roleStemFromFile(fileName, suffix) {
-  return fileName.replace(new RegExp(`-${suffix}\\.(md|json)$`), "");
-}
-
-function formatSignedDelta(value) {
-  return value > 0 ? `+${value}` : String(value);
-}
-
-function formatPathListInline(paths) {
-  return paths.length > 0 ? paths.map((entry) => `\`${entry}\``).join(", ") : "(none)";
-}
-
-function formatPhaseLabel(phase) {
-  return phase === "standard" ? "standard match" : "sudden death";
-}
-
-function transcriptHeading(event) {
-  switch (event.eventType) {
-    case "question_submission":
-      return `${event.speakerName} question package`;
-    case "answer_submission":
-      return `${event.speakerName} answer package`;
-    case "judge_ruling":
-      return `${event.speakerName} ruling`;
-    case "automatic_ruling":
-      return "Automatic ruling from the match runner";
-    default:
-      throw new Error(`Unsupported event type: ${event.eventType}`);
-  }
-}
-
-function renderTranscript({ matchId, participantAName, participantBName, judgeName, currentScore, latestCompletedTurn, events }) {
-  const lines = [
-    "# Hearing Transcript",
-    "",
-    `- Match ID: \`${matchId}\``,
-    `- Participant A: \`${participantAName}\``,
-    `- Participant B: \`${participantBName}\``,
-    `- Judge: \`${judgeName}\``,
-    `- Current score: \`${currentScore}\``,
-    `- Latest completed turn: \`${latestCompletedTurn}\``,
-    "",
-    "This file is generated by the flow from the per-turn messages that participants and the judge submitted.",
-    "",
-  ];
-
-  if (events.length === 0) {
-    lines.push("No participant or judge messages have been recorded yet.", "");
-    return `${lines.join("\n").trimEnd()}\n`;
-  }
-
-  let currentTurn = null;
-  for (const event of events) {
-    if (event.turn !== currentTurn) {
-      if (currentTurn !== null) {
-        lines.push("");
-      }
-      lines.push(`## Turn ${event.turn} (${formatPhaseLabel(event.phase)})`, "");
-      currentTurn = event.turn;
-    }
-
-    lines.push(`### ${transcriptHeading(event)}`, "");
-    lines.push(event.body, "");
-
-    if (event.structuredData !== undefined) {
-      lines.push("```json", JSON.stringify(event.structuredData, null, 2), "```", "");
-    }
-  }
-
-  return `${lines.join("\n").trimEnd()}\n`;
 }
 
 await main();
