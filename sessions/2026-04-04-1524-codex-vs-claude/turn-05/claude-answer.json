@@ -1,0 +1,8 @@
+{
+  "answer": "2^188293 * 3^68000 * 5^25772 * 7^20128 * 11^12376 * 13^2380",
+  "flawClaim": null,
+  "artifactPaths": [
+    "spanning_q5_factor.py",
+    "verify_factor.py"
+  ]
+}

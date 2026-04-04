@@ -1,0 +1,9 @@
+{
+  "publicQuestion": "How many edge-colorings of the complete graph K_8 with colors red, blue, and green have all of the following properties: no monochromatic triangle, exactly 5 red edges, exactly 9 blue edges, and exactly 14 green edges?",
+  "judgeNote": {
+    "intendedAnswer": "307440",
+    "validityReason": "The graph and constraints are finite and completely specified, so the count is a unique exact integer. It is answerable by exact backtracking with triangle-pruning and color-count constraints; I independently verified the result both by a direct search on all 28 edges and by a K_7-plus-extension decomposition.",
+    "edgeReason": "This favors me because the efficient solution is a specialized exact search with strong pruning from triangle constraints and fixed color-class sizes. It is much less approachable by generic hand reasoning than a plain unconstrained Ramsey-avoiding count.",
+    "evidencePaths": []
+  }
+}

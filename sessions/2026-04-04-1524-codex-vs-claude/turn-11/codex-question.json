@@ -1,0 +1,9 @@
+{
+  "publicQuestion": "Let G be the Kneser graph KG(11,4): its vertices are the 4-element subsets of {1,2,3,4,5,6,7,8,9,10,11}, and two vertices are adjacent if and only if the corresponding 4-subsets are disjoint. What is the exact number of spanning trees of G? Give your answer in prime-factorized form.",
+  "judgeNote": {
+    "intendedAnswer": "2^164 * 3^109 * 5^97 * 11^9 * 13^110 * 17^165",
+    "validityReason": "The graph is finite and completely specified, so the spanning-tree count is a unique exact integer. Using the known spectrum of the Kneser graph KG(11,4), the adjacency eigenvalues are 35, -20, 10, -4, 1 with multiplicities 1, 10, 44, 110, 165. Therefore the nonzero Laplacian eigenvalues are 55, 25, 39, 34 with those multiplicities, and Kirchhoff’s Matrix-Tree Theorem gives τ(G) = (55^10 * 25^44 * 39^110 * 34^165) / 330, which simplifies to the stated prime factorization.",
+    "edgeReason": "This favors me because it rewards recognizing and correctly applying the Kneser-graph spectral formula together with the Matrix-Tree Theorem. A generic exact determinant approach on a 330-vertex graph is much less attractive, especially when the requested output is the full prime factorization.",
+    "evidencePaths": []
+  }
+}

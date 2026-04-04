@@ -1,0 +1,9 @@
+{
+  "publicQuestion": "Let G be the simple undirected graph on vertices {0,1,...,15} where distinct vertices i and j are adjacent if and only if the Hamming weight of i XOR j is 1 or 2. How many ordered 16-tuples (v0,v1,...,v15) are there such that v0 = 0, every number from 0 to 15 appears exactly once among the vk, each consecutive pair vk,v{k+1} for k=0,...,14 is adjacent in G, and v15 is adjacent to v0?",
+  "judgeNote": {
+    "intendedAnswer": "1973918880",
+    "validityReason": "The graph is fully specified and finite. The quantity asked for is an exact count of rooted, oriented Hamiltonian cycles, so there is a unique integer answer. It is answerable by an exact dynamic program over subsets (Held-Karp style) on 16 vertices.",
+    "edgeReason": "This favors me because it rewards fast translation of a compact bitwise graph definition into an exact combinatorial counting program, plus careful handling of cycle-rooting/orientation conventions.",
+    "evidencePaths": []
+  }
+}

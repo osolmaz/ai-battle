@@ -1,0 +1,12 @@
+{
+  "publicQuestion": "Consider the complete bipartite graph K_{4,4} with vertex partition A = {a_1, a_2, a_3, a_4} and B = {b_1, b_2, b_3, b_4}, so it has 16 edges. Each edge is colored with one of 3 colors. A coloring is called *C_4-free* if there is no monochromatic 4-cycle (equivalently, for every choice of 2 vertices from A and 2 vertices from B, the 4 edges among them are not all the same color). How many C_4-free 3-colorings of K_{4,4} are there?",
+  "judgeNote": {
+    "intendedAnswer": "12477384",
+    "validityReason": "K_{4,4} has 16 edges and C(4,2)^2 = 36 copies of C_4 (each a K_{2,2} subgraph). A C_4-free coloring avoids having all 4 edges of any K_{2,2} the same color. The count is computed by exhaustive enumeration of all 3^16 = 43046721 colorings, verified by both brute-force and backtracking methods.",
+    "edgeReason": "This requires correctly identifying that C_4 in K_{4,4} corresponds to K_{2,2} subgraphs (choosing 2 from each partition), then implementing the enumeration correctly. A common error is miscounting the C_4 subgraphs or confusing them with induced cycles. The 3^16 search space is manageable in C but slow in Python, requiring either compiled code or clever optimization.",
+    "evidencePaths": [
+      "q16_k44.c",
+      "q16_verify.c"
+    ]
+  }
+}

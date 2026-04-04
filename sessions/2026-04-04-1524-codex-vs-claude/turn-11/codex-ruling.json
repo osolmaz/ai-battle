@@ -1,0 +1,4 @@
+{
+  "outcome": "answerer_point",
+  "reason": "The question is valid, and the Kneser-spectrum/Kirchhoff computation gives the stated factorization 2^164 * 3^109 * 5^97 * 11^9 * 13^110 * 17^165."
+}

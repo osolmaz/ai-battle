@@ -1,0 +1,4 @@
+{
+  "outcome": "answerer_point",
+  "reason": "The question is valid, and Burnside’s lemma gives rotation sum 969479437 with zero reflection fixed points, so dividing by 240 yields 958206171 modulo 1000000007, matching the answer."
+}

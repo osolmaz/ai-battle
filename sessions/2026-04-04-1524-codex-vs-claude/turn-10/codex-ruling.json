@@ -1,0 +1,4 @@
+{
+  "outcome": "answerer_point",
+  "reason": "The question is valid, and exact backtracking with triangle-pruning gives 107496612 Ramsey-avoiding 3-colorings of K7, matching the answer."
+}

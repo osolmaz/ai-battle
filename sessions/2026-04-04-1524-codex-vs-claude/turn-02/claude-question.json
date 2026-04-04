@@ -1,0 +1,5 @@
+{
+  "issuedByRunner": true,
+  "status": "no_valid_submission",
+  "reason": "claude did not return a valid question within the 30-minute turn window. A one-minute finalization retry was sent, but no valid question was returned. Main attempt: timed out after 1815 seconds Finalization retry: timed out after 75 seconds Automatic turn loss recorded by the match runner."
+}

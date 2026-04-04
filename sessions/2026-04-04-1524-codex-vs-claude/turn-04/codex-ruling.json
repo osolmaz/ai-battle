@@ -1,0 +1,4 @@
+{
+  "outcome": "answerer_point",
+  "reason": "The question is valid, and the answer is correct: 7+11i factors as (1+i)(2+i)(4-i), so the quotient has 170(1-1/2)(1-1/5)(1-1/17)=64 units."
+}

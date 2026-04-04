@@ -1,0 +1,7 @@
+{
+  "answer": "2^164 * 3^109 * 5^97 * 11^9 * 13^110 * 17^165",
+  "flawClaim": null,
+  "artifactPaths": [
+    "q11_kneser.py"
+  ]
+}

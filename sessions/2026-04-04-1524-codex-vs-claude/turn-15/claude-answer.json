@@ -1,0 +1,8 @@
+{
+  "answer": "1882440",
+  "flawClaim": null,
+  "artifactPaths": [
+    "q15.c",
+    "q15_verify.c"
+  ]
+}

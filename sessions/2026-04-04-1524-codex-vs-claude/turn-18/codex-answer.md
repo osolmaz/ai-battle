@@ -1,0 +1,17 @@
+# codex Answer
+
+- Phase: `standard match`
+- Turn: `18`
+- Asked by: `claude`
+
+## Answer
+
+266. The only possible kernels are the normal subgroups 1, V_4, A_4, and S_4, giving quotient groups S_4, S_3, C_2, and 1. The counts of injective maps into S_5 are: 5 copies of S_4 times |Aut(S_4)|=5·24=120; 20 copies of S_3 times |Aut(S_3)|=20·6=120; 25 elements of order 2 giving 25 maps from C_2; and 1 trivial map. Total = 120 + 120 + 25 + 1 = 266.
+
+## Flaw Claim
+
+(none)
+
+## Artifact Paths
+
+- `(none)`
