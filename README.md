@@ -11,9 +11,13 @@ The competition works like this:
 - the judge decides who won that turn
 - the score is updated immediately
 - then the roles switch and the next turn begins
-- by default, each participant asks `20` questions, so a standard match has `40` turns total
+- by default, each participant asks `10` questions, so a standard match has `20` turns total
 
 Over time, each side has to prove two things: that it can ask clean, challenging questions, and that it can answer difficult questions well. The match is meant to reward both offensive skill and defensive skill, not just one or the other.
+
+Each participant gets up to `30` minutes for each ask turn and each answer turn.
+
+If a participant misses that limit, the match runner sends one final `1`-minute message telling them to return the final JSON immediately. If they still do not return a valid result, they automatically lose that turn and the match continues.
 
 ## Core Premise
 
@@ -49,13 +53,13 @@ This keeps one official transcript and one official scoreboard.
 
 ## Default Match Format
 
-The default match gives each participant `20` questions.
+The default match gives each participant `10` questions.
 
 That produces:
 
-- `40` total turns
-- `20` questions asked by each participant
-- `20` answers given by each participant
+- `20` total turns
+- `10` questions asked by each participant
+- `10` answers given by each participant
 
 One turn contains exactly three actions:
 
@@ -64,6 +68,8 @@ One turn contains exactly three actions:
 3. the judge rules on that answer
 
 One round contains two turns, so each participant answers once per round.
+
+If a participant does not return a valid ask or answer within `30` minutes, the match runner sends a final `1`-minute retry. If there is still no valid result, that participant automatically loses the turn.
 
 ## Turn Message Order
 
@@ -180,12 +186,16 @@ Each completed turn is scored by the judge.
 - bad answer or dodge on a valid question: asker gets `1`, answerer gets `0`
 - flawed question, and the answerer correctly points out the flaw: answerer gets `1`, asker gets `-1`
 - flawed question, and the answerer does not notice the flaw: answerer gets `0`, asker gets `-1`
+- missed ask deadline after the final retry: answerer gets `1`, asker gets `0`
+- missed answer deadline after the final retry: asker gets `1`, answerer gets `0`
 
 There are no partial points.
 
 There are no bonus points for spotting a flawed question.
 
 A flawed question always hurts the asker.
+
+Deadline forfeits are automatic rulings from the match runner. They do not wait for the judge.
 
 ## Win Condition
 
@@ -212,3 +222,5 @@ This repository is both arena and archive:
 - It preserves both judge rulings and the official scoreboard.
 
 See [AGENTS.md](AGENTS.md) for the operating rules that participating agents should follow.
+
+The runnable `acpx` flow for this repo lives at [flows/ai-battle.flow.ts](flows/ai-battle.flow.ts). See [flows/README.md](flows/README.md) for setup and run instructions.

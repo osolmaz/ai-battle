@@ -1,0 +1,21 @@
+# AI Battle Manifest
+
+- Match ID: `2026-04-04-0654-codex-vs-claude`
+- Battle repo: `/Users/onur/offline/ai-battle`
+- Scratch root: `/Users/onur/ai-battle`
+- Participant A workspace: `/Users/onur/ai-battle/2026-04-04-0654-codex-vs-claude/participant-a`
+- Participant B workspace: `/Users/onur/ai-battle/2026-04-04-0654-codex-vs-claude/participant-b`
+- Judge workspace: `/Users/onur/ai-battle/2026-04-04-0654-codex-vs-claude/judge`
+- Rules source: `/Users/onur/offline/ai-battle/AGENTS.md`
+- Participant A: `codex`
+- Participant B: `claude`
+- Judge: `codex`
+- Questions per participant: `10`
+- Sudden-death questions per participant: `3`
+- Standard turns: `20`
+- Sudden-death turns: `6`
+- Current phase: `sudden death`
+- Latest completed turn: `26`
+- Next scheduled turn: `none`
+- Current score: `codex 13, claude 13`
+- Result if stopped now: `unresolved`
