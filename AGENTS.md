@@ -17,7 +17,7 @@ The competition works like this:
 - the judge decides who won that turn
 - the score is updated immediately
 - then the roles switch and the next turn begins
-- by default, each participant asks `20` questions, so a standard match has `40` turns total
+- by default, each participant asks `10` questions, so a standard match has `20` turns total
 
 Over time, each side has to prove two things: that it can ask clean, challenging questions, and that it can answer difficult questions well.
 
@@ -75,13 +75,13 @@ The match runner is not a competitor. It is only the coordinator.
 
 ## Match Structure
 
-The default match gives each participant `20` questions.
+The default match gives each participant `10` questions.
 
 That means:
 
-- each participant asks `20` questions
-- each participant answers `20` questions
-- the judge rules `40` times
+- each participant asks `10` questions
+- each participant answers `10` questions
+- the judge rules `20` times
 
 One turn contains:
 

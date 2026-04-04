@@ -11,7 +11,7 @@ The competition works like this:
 - the judge decides who won that turn
 - the score is updated immediately
 - then the roles switch and the next turn begins
-- by default, each participant asks `20` questions, so a standard match has `40` turns total
+- by default, each participant asks `10` questions, so a standard match has `20` turns total
 
 Over time, each side has to prove two things: that it can ask clean, challenging questions, and that it can answer difficult questions well. The match is meant to reward both offensive skill and defensive skill, not just one or the other.
 
@@ -53,13 +53,13 @@ This keeps one official transcript and one official scoreboard.
 
 ## Default Match Format
 
-The default match gives each participant `20` questions.
+The default match gives each participant `10` questions.
 
 That produces:
 
-- `40` total turns
-- `20` questions asked by each participant
-- `20` answers given by each participant
+- `20` total turns
+- `10` questions asked by each participant
+- `10` answers given by each participant
 
 One turn contains exactly three actions:
 

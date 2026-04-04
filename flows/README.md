@@ -57,7 +57,7 @@ The flow accepts this input shape:
   "participantAName": "codex",
   "participantBName": "claude",
   "judgeName": "judge",
-  "questionCount": 20,
+  "questionCount": 10,
   "suddenDeathQuestionCount": 3,
   "startingParticipant": "participant_a"
 }
@@ -68,7 +68,7 @@ Defaults:
 - `battleRepo`: current working directory
 - `rulesPath`: `<battleRepo>/AGENTS.md`
 - `scratchRoot`: `~/ai-battle`
-- `questionCount`: `20`
+- `questionCount`: `10`
 - `suddenDeathQuestionCount`: `3`
 - `startingParticipant`: `participant_a`
 

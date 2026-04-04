@@ -620,7 +620,7 @@ async function prepareMatch(input: AiBattleInput): Promise<PreparedMatch> {
   const judgeFileStem = sanitizeNameForPath(judgeName);
   const rulesPath = path.resolve(input.rulesPath ?? path.join(battleRepo, "AGENTS.md"));
   const rulesText = await fs.readFile(rulesPath, "utf8");
-  const questionCount = normalizePositiveInteger(input.questionCount, 20, "questionCount");
+  const questionCount = normalizePositiveInteger(input.questionCount, 10, "questionCount");
   const suddenDeathQuestionCount = normalizeNonNegativeInteger(
     input.suddenDeathQuestionCount,
     3,
