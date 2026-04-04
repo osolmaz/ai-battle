@@ -12,8 +12,8 @@ For each run, keep:
 - `final/scoreboard.md`
 - `ARCHIVE.md` if present
 - `workspaces/` only if the scratch files are useful for reproducibility
-- `acpx-sessions/` if you want the raw per-agent ACP transcripts
-- `native-sessions/` if you want the original Codex or Claude session files too
+- `acpx-sessions/` for the participant and judge ACP transcripts
+- `native-sessions/` for the original Codex and Claude session files
 
 ## Do Not Commit
 
@@ -24,9 +24,9 @@ Do not commit:
 
 Those files are mostly runner state, traces, projections, and artifact snapshots. They are useful for debugging `acpx`, but they add noise, absolute local paths, and a lot of churn.
 
-## Optional Raw Session Logs
+## Session Files To Back Up
 
-If you want richer per-agent context, copy the specific ACP session files into the run directory as:
+Back up the ACP wrapper session files for each role into the run directory as:
 
 - `sessions/<battle-id>/acpx-sessions/<role>.session.json`
 - `sessions/<battle-id>/acpx-sessions/<role>.stream.ndjson`
@@ -40,7 +40,7 @@ This keeps the battle archive readable while preserving:
 
 These files may contain absolute local paths and adapter-specific logging.
 
-If you also want the original adapter logs, copy them separately as:
+Also back up the original adapter logs separately as:
 
 - `sessions/<battle-id>/native-sessions/codex-participant.rollout.jsonl`
 - `sessions/<battle-id>/native-sessions/claude-participant.jsonl`
@@ -48,14 +48,23 @@ If you also want the original adapter logs, copy them separately as:
 
 Use names that make the role and adapter obvious. Keep these separate from `acpx-sessions/` so it is clear which files come from the ACP wrapper and which come from the underlying model adapter.
 
+For a Codex vs Claude run with Codex as judge, that means backing up all of these if they exist:
+
+- participant ACP session JSON and stream for Codex
+- participant ACP session JSON and stream for Claude
+- judge ACP session JSON and stream for Codex
+- Codex participant rollout JSONL
+- Claude participant JSONL
+- Codex judge rollout JSONL
+
 ## Repo Backup Workflow
 
 To keep a run in the repo efficiently:
 
 1. Copy the competition record into `sessions/<battle-id>/`.
 2. Copy only the participant scratch files you want to preserve.
-3. Optionally copy selected ACP session logs into `acpx-sessions/`.
-4. Optionally copy selected native adapter session logs into `native-sessions/`.
+3. Copy the ACP session logs into `acpx-sessions/`.
+4. Copy the native adapter session logs into `native-sessions/`.
 5. Do not copy the `runner/` directory.
 6. Commit the session directory.
 
