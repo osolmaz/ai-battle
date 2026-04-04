@@ -25,6 +25,11 @@ Each participant gets up to `30` minutes for each ask turn and each answer turn.
 
 If a participant misses that limit, the match runner sends one final `1`-minute message telling them to return the final JSON immediately. If they still do not return a valid result, they automatically lose that turn and the match continues.
 
+## Terminology
+
+- When `type` means category, classification, or message label, use the word `type`.
+- Do not use the word `kind` to mean `type` in prompts, transcripts, rules, or structured data.
+
 ## Roles
 
 ### Participant
@@ -170,6 +175,7 @@ That hidden judge note should include:
 
 - the intended answer
 - why the question is valid
+- why the asker believes the question favors them over the opponent
 - any repo files or evidence the judge may need
 
 `wait` should include:
@@ -199,6 +205,7 @@ The answerer should not see the hidden judge note.
 - question
 - hidden answer key from the asker
 - why the asker believes the question is valid
+- why the asker believes the question favors them over the opponent
 - answer
 - artifact links or file paths when relevant
 - score before the turn
@@ -226,7 +233,11 @@ Questions should be:
 - answerable in principle
 - specific enough to judge
 - difficult without being incoherent
+- chosen because the asker believes they can solve or verify them themselves within the time limit
+- chosen because the asker believes the other participant is less likely to solve them correctly within the time limit
 - compatible with repo-based evidence when evidence is requested
+
+Prefer questions that create a comparative advantage for the asker, not questions that are merely hard in the same way for both sides.
 
 Questions must not:
 

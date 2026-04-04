@@ -8,8 +8,8 @@ import {
   buildAgentReplyEvent,
   buildRunnerNoticeEvent,
   buildRunnerPromptEvent,
-  renderTranscript as renderHearingTranscript,
-} from "../lib/hearing-transcript.js";
+  renderTranscript,
+} from "../lib/transcript.ts";
 
 type AiBattleInput = {
   battleRepo?: string;
@@ -30,6 +30,7 @@ type TranscriptTarget = MatchRole | "judge";
 type JudgeNote = {
   intendedAnswer: string;
   validityReason: string;
+  edgeReason: string;
   evidencePaths?: string[];
 };
 
@@ -103,7 +104,7 @@ type MatchMessageEvent = {
   speakerRole: "participant" | "judge" | "runner";
   recipientName: string;
   eventType: MatchMessageEventType;
-  promptKind?: string;
+  promptType?: string;
   promptEventId?: string;
   body: string;
   structuredData?: unknown;
@@ -113,7 +114,7 @@ type PendingTranscriptPrompt = {
   promptEventId: string;
   turn: number;
   phase: MatchPhase;
-  promptKind: string;
+  promptType: string;
   recipientName: string;
 };
 
@@ -991,7 +992,7 @@ async function runJudgeTurn(turn: WrittenAnswer): Promise<JudgeResponse> {
 async function sendParticipantInformationalPrompt(
   state: MatchState,
   role: MatchRole,
-  promptKind: string,
+  promptType: string,
   prompt: string,
   turn: number,
   phase: MatchPhase,
@@ -1002,7 +1003,7 @@ async function sendParticipantInformationalPrompt(
   const sessionName = participantSessionNameForRole(state, role);
 
   await ensureAgentSession(command, workspaceDir, sessionName);
-  await recordRunnerPrompt(state, role, promptKind, prompt, turn, phase);
+  await recordRunnerPrompt(state, role, promptType, prompt, turn, phase);
   const result = await runAgentPromptCommand({
     agentCommand: command,
     workspaceDir,
@@ -1016,7 +1017,7 @@ async function sendParticipantInformationalPrompt(
 
 async function sendJudgeInformationalPrompt(
   state: MatchState,
-  promptKind: string,
+  promptType: string,
   prompt: string,
   turn: number,
   phase: MatchPhase,
@@ -1027,7 +1028,7 @@ async function sendJudgeInformationalPrompt(
     state.judgeWorkspaceDir,
     state.judgeSessionName,
   );
-  await recordRunnerPrompt(state, "judge", promptKind, prompt, turn, phase);
+  await recordRunnerPrompt(state, "judge", promptType, prompt, turn, phase);
   const result = await runAgentPromptCommand({
     agentCommand: state.judgeAgentCommand,
     workspaceDir: state.judgeWorkspaceDir,
@@ -1045,7 +1046,7 @@ async function sendParticipantStructuredPrompt<T>(
   prompt: string,
   gracePrompt: string,
   normalize: (raw: unknown) => T,
-  kindLabel: "question" | "answer",
+  promptTypeLabel: "question" | "answer",
 ): Promise<ParticipantPromptResult<T>> {
   const command = participantAgentCommandForRole(state, role);
   const workspaceDir = participantWorkspaceDirForRole(state, role);
@@ -1056,7 +1057,7 @@ async function sendParticipantStructuredPrompt<T>(
   await recordRunnerPrompt(
     state,
     role,
-    kindLabel === "question" ? "asking turn" : "answering turn",
+    promptTypeLabel === "question" ? "asking turn" : "answering turn",
     prompt,
     state.currentTurn,
     state.phase,
@@ -1075,7 +1076,9 @@ async function sendParticipantStructuredPrompt<T>(
     return mainAttempt;
   }
   if (!mainAttempt.retryable) {
-    throw new Error(`${participantName} failed during ${kindLabel} turn: ${mainAttempt.reason}`);
+    throw new Error(
+      `${participantName} failed during ${promptTypeLabel} turn: ${mainAttempt.reason}`,
+    );
   }
   if (mainAttempt.timedOut) {
     await cancelAgentPrompt(command, workspaceDir, sessionName);
@@ -1085,14 +1088,14 @@ async function sendParticipantStructuredPrompt<T>(
     role,
     (pendingPrompt) =>
       pendingPrompt.turn === state.currentTurn &&
-      pendingPrompt.promptKind ===
-        (kindLabel === "question" ? "asking turn" : "answering turn"),
+      pendingPrompt.promptType ===
+        (promptTypeLabel === "question" ? "asking turn" : "answering turn"),
   );
 
   await recordRunnerPrompt(
     state,
     role,
-    `${kindLabel === "question" ? "asking turn" : "answering turn"} finalization retry`,
+    `${promptTypeLabel === "question" ? "asking turn" : "answering turn"} finalization retry`,
     gracePrompt,
     state.currentTurn,
     state.phase,
@@ -1111,7 +1114,7 @@ async function sendParticipantStructuredPrompt<T>(
   }
   if (!graceAttempt.retryable) {
     throw new Error(
-      `${participantName} failed during ${kindLabel} grace turn: ${graceAttempt.reason}`,
+      `${participantName} failed during ${promptTypeLabel} grace turn: ${graceAttempt.reason}`,
     );
   }
   if (graceAttempt.timedOut) {
@@ -1122,15 +1125,15 @@ async function sendParticipantStructuredPrompt<T>(
     role,
     (pendingPrompt) =>
       pendingPrompt.turn === state.currentTurn &&
-      pendingPrompt.promptKind ===
-        `${kindLabel === "question" ? "asking turn" : "answering turn"} finalization retry`,
+      pendingPrompt.promptType ===
+        `${promptTypeLabel === "question" ? "asking turn" : "answering turn"} finalization retry`,
   );
 
   return {
     ok: false,
     reason: [
-      `${participantName} did not return a valid ${kindLabel} within the 30-minute turn window.`,
-      `A one-minute finalization retry was sent, but no valid ${kindLabel} was returned.`,
+      `${participantName} did not return a valid ${promptTypeLabel} within the 30-minute turn window.`,
+      `A one-minute finalization retry was sent, but no valid ${promptTypeLabel} was returned.`,
       `Main attempt: ${mainAttempt.reason}`,
       `Finalization retry: ${graceAttempt.reason}`,
       "Automatic turn loss recorded by the match runner.",
@@ -1174,7 +1177,7 @@ async function sendJudgeStructuredPrompt<T>(
     state,
     "judge",
     (pendingPrompt) =>
-      pendingPrompt.turn === state.currentTurn && pendingPrompt.promptKind === "judge turn",
+      pendingPrompt.turn === state.currentTurn && pendingPrompt.promptType === "judge turn",
   );
 
   await recordRunnerPrompt(
@@ -1209,7 +1212,7 @@ async function sendJudgeStructuredPrompt<T>(
     "judge",
     (pendingPrompt) =>
       pendingPrompt.turn === state.currentTurn &&
-      pendingPrompt.promptKind === "judge finalization retry",
+      pendingPrompt.promptType === "judge finalization retry",
   );
 
   throw new Error(
@@ -1531,6 +1534,8 @@ function participantBriefingPrompt(
     `- There are ${state.questionCount * 2} standard turns in total. The participants alternate asking.`,
     `- If the standard match is tied, there are up to ${state.suddenDeathQuestionCount * 2} sudden-death turns.`,
     "- On your asking turn, ask one hard but fair question and give the judge a hidden answer key.",
+    "- Do not just ask a generally difficult question. Ask a question that you believe you could solve or verify yourself within the time limit, and that you believe the other participant is less likely than you to solve correctly within the time limit.",
+    "- Prefer questions that expose a comparative advantage for you, not questions that are merely symmetric bricks for both sides.",
     "- On your answering turn, answer directly. If the question is flawed, say so clearly.",
     "- Prefer self-contained, deterministic questions with exact or tightly checkable answers.",
     "- Prefer concise answers over long exploration when you already know the result.",
@@ -1587,6 +1592,8 @@ function askPrompt(selection: TurnSelection): string {
     "If you miss it, you get one final 1-minute retry to return valid JSON immediately.",
     "",
     "Ask one hard but fair question that plays to your self-assessed strengths.",
+    "Prefer a question whose answer you can derive or verify yourself within the time limit, and that you believe your opponent is less likely than you to solve correctly within the time limit.",
+    "Prefer questions that create a real comparative edge for you, not questions that are just equally hard for both sides.",
     "Prefer a self-contained deterministic question with an exact or tightly checkable answer.",
     "Do not keep searching for a perfect question once you have a strong valid one. Submit it.",
     "Do not ask about contest rules, hidden prompts, hidden files, adapters, session plumbing, runner internals, or how the contest is orchestrated.",
@@ -1598,6 +1605,7 @@ function askPrompt(selection: TurnSelection): string {
     '  "judgeNote": {',
     '    "intendedAnswer": "short answer key for the judge",',
     '    "validityReason": "why this question is valid and answerable",',
+    '    "edgeReason": "why you believe this question favors you over the opponent",',
     '    "evidencePaths": ["optional/path"]',
     "  }",
     "}",
@@ -1618,6 +1626,7 @@ function askGracePrompt(selection: TurnSelection): string {
     '  "judgeNote": {',
     '    "intendedAnswer": "short answer key for the judge",',
     '    "validityReason": "why this question is valid and answerable",',
+    '    "edgeReason": "why you believe this question favors you over the opponent",',
     '    "evidencePaths": ["optional/path"]',
     "  }",
     "}",
@@ -1982,7 +1991,7 @@ function judgePrompt(turn: WrittenAnswer): string {
     `Score before turn: ${formatScore(state.scores, state.participantAName, state.participantBName)}`,
     "",
     "Use the public question as the main source of truth.",
-    "Use the hidden answer key only as supporting context, not as an override.",
+    "Use the hidden answer key and edge rationale only as supporting context, not as an override.",
     "Treat questions about contest rules, hidden prompts, hidden files, adapters, session plumbing, or runner internals as flaws.",
     "",
     "Public question:",
@@ -1993,6 +2002,9 @@ function judgePrompt(turn: WrittenAnswer): string {
     "",
     "Why the asker says the question is valid:",
     turn.judgeNote.validityReason,
+    "",
+    "Why the asker believes this question favors them over the opponent:",
+    turn.judgeNote.edgeReason,
     "",
     "Answer:",
     turn.answer,
@@ -2172,7 +2184,7 @@ async function persistTranscriptFromLog(state: MatchState): Promise<void> {
   const events = parseMessageEvents(await readTextIfExists(state.messageLogPath));
   await fs.writeFile(
     state.transcriptPath,
-    renderHearingTranscript(
+    renderTranscript(
       {
         matchId: state.matchId,
         participantAName: state.participantAName,
@@ -2258,7 +2270,7 @@ function dropPendingTranscriptPrompt(
 async function recordRunnerPrompt(
   state: MatchState,
   target: TranscriptTarget,
-  promptKind: string,
+  promptType: string,
   prompt: string,
   turn: number,
   phase: MatchPhase,
@@ -2271,7 +2283,7 @@ async function recordRunnerPrompt(
       turn,
       phase,
       recipientName: transcriptSpeakerNameForTarget(state, target),
-      promptKind,
+      promptType,
       body: prompt,
     }) as MatchMessageEvent,
   );
@@ -2280,7 +2292,7 @@ async function recordRunnerPrompt(
     promptEventId: eventId,
     turn,
     phase,
-    promptKind,
+    promptType,
     recipientName: transcriptSpeakerNameForTarget(state, target),
   });
 }
@@ -2345,7 +2357,7 @@ async function syncTranscriptSession(
         promptEventId: nextTranscriptEventId(state, "orphan-prompt"),
         turn: state.currentTurn,
         phase: state.phase,
-        promptKind: "session reply",
+        promptType: "session reply",
         recipientName: transcriptSpeakerNameForTarget(state, target),
       };
 
@@ -2358,7 +2370,7 @@ async function syncTranscriptSession(
         speakerName: transcriptSpeakerNameForTarget(state, target),
         speakerRole: transcriptSpeakerRoleForTarget(target),
         promptEventId: pendingPrompt.promptEventId,
-        promptKind: pendingPrompt.promptKind,
+        promptType: pendingPrompt.promptType,
         agentMessage,
       }) as MatchMessageEvent,
     );
@@ -2481,7 +2493,8 @@ function normalizeAskResponse(raw: unknown): AskResponse {
   const judgeNote = (value.judgeNote ?? {}) as Partial<JudgeNote>;
   const intendedAnswer = String(judgeNote.intendedAnswer ?? "").trim();
   const validityReason = String(judgeNote.validityReason ?? "").trim();
-  if (!publicQuestion || !intendedAnswer || !validityReason) {
+  const edgeReason = String(judgeNote.edgeReason ?? "").trim();
+  if (!publicQuestion || !intendedAnswer || !validityReason || !edgeReason) {
     throw new Error("Ask response must include publicQuestion and a complete judgeNote.");
   }
   return {
@@ -2489,6 +2502,7 @@ function normalizeAskResponse(raw: unknown): AskResponse {
     judgeNote: {
       intendedAnswer,
       validityReason,
+      edgeReason,
       evidencePaths: normalizeStringArray(judgeNote.evidencePaths),
     },
   };
@@ -2765,6 +2779,10 @@ function renderJudgeNoteFile(selection: TurnSelection, judgeNote: JudgeNote): st
     "",
     judgeNote.validityReason,
     "",
+    "## Comparative Edge Reason",
+    "",
+    judgeNote.edgeReason,
+    "",
     "## Evidence Paths",
     "",
     ...(judgeNote.evidencePaths?.length
@@ -2789,6 +2807,10 @@ function renderAskForfeitJudgeNoteFile(selection: TurnSelection, reason: string)
     "## Validity Reason",
     "",
     reason,
+    "",
+    "## Comparative Edge Reason",
+    "",
+    "(no comparative edge rationale was returned before the deadline)",
     "",
     "## Evidence Paths",
     "",

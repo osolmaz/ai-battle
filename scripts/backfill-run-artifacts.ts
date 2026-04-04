@@ -1,5 +1,6 @@
-#!/usr/bin/env node
+#!/usr/bin/env -S npx tsx
 
+import type { Dirent } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import {
@@ -7,12 +8,29 @@ import {
   buildRunnerNoticeEvent,
   buildRunnerPromptEvent,
   renderTranscript,
-} from "../lib/hearing-transcript.js";
+  type TranscriptEvent,
+  type TranscriptPhase,
+} from "../lib/transcript.ts";
 
-async function main() {
+type TurnSummary = {
+  turn: number;
+  phase: TranscriptPhase;
+  askerName: string;
+  answererName: string;
+  outcome: string;
+  reason: string;
+  issuedByRunner: boolean;
+};
+
+type PromptExchange = {
+  promptText: string;
+  agentMessage?: Record<string, unknown>;
+};
+
+async function main(): Promise<void> {
   const matchDirArg = process.argv[2];
   if (!matchDirArg) {
-    throw new Error("Usage: node scripts/backfill-run-artifacts.mjs <match-dir>");
+    throw new Error("Usage: npx tsx scripts/backfill-run-artifacts.ts <match-dir>");
   }
 
   const matchDir = path.resolve(matchDirArg);
@@ -25,11 +43,11 @@ async function main() {
   const matchId = stripCode(manifestFields["Match ID"]);
 
   const turnDirs = (await fs.readdir(matchDir, { withFileTypes: true }))
-    .filter((entry) => entry.isDirectory() && /^turn-\d+$/.test(entry.name))
-    .map((entry) => entry.name)
+    .filter((entry: Dirent) => entry.isDirectory() && /^turn-\d+$/.test(entry.name))
+    .map((entry: Dirent) => entry.name)
     .sort();
 
-  const turnSummaries = [];
+  const turnSummaries: TurnSummary[] = [];
   let latestScore = `${participantAName} 0, ${participantBName} 0`;
   let latestTurn = 0;
 
@@ -65,6 +83,7 @@ async function main() {
     const questionText = extractSection(questionMd, "Question");
     const intendedAnswer = extractSection(judgeNoteMd, "Intended Answer");
     const validityReason = extractSection(judgeNoteMd, "Validity Reason");
+    const edgeReason = normalizeOptionalText(extractSection(judgeNoteMd, "Comparative Edge Reason"));
     const evidencePaths = parseListSection(extractSection(judgeNoteMd, "Evidence Paths"));
     const answerText = extractSection(answerMd, "Answer");
     const flawClaimText = extractSection(answerMd, "Flaw Claim");
@@ -82,6 +101,7 @@ async function main() {
       judgeNote: {
         intendedAnswer,
         validityReason,
+        ...(edgeReason ? { edgeReason } : {}),
         evidencePaths,
       },
     };
@@ -144,10 +164,17 @@ async function main() {
   const judgeExchanges = buildPromptExchanges(judgeSession);
 
   let eventCounter = 1;
-  const nextEventId = (prefix) => `${prefix}-${String(eventCounter++).padStart(6, "0")}`;
-  const events = [];
+  const nextEventId = (prefix: string) => `${prefix}-${String(eventCounter++).padStart(6, "0")}`;
+  const events: TranscriptEvent[] = [];
 
-  const appendExchange = (exchange, speakerName, speakerRole, turn, phase, promptKind) => {
+  const appendExchange = (
+    exchange: PromptExchange | undefined,
+    speakerName: string,
+    speakerRole: "participant" | "judge",
+    turn: number,
+    phase: TranscriptPhase,
+    promptType: string,
+  ) => {
     if (!exchange) {
       return;
     }
@@ -158,7 +185,7 @@ async function main() {
         turn,
         phase,
         recipientName: speakerName,
-        promptKind,
+        promptType,
         body: exchange.promptText,
       }),
     );
@@ -171,7 +198,7 @@ async function main() {
           speakerName,
           speakerRole,
           promptEventId,
-          promptKind,
+          promptType,
           agentMessage: exchange.agentMessage,
         }),
       );
@@ -194,14 +221,7 @@ async function main() {
     "standard",
     "rules briefing",
   );
-  appendExchange(
-    judgeExchanges.shift(),
-    judgeName,
-    "judge",
-    0,
-    "standard",
-    "rules briefing",
-  );
+  appendExchange(judgeExchanges.shift(), judgeName, "judge", 0, "standard", "rules briefing");
 
   for (const summary of turnSummaries) {
     const askerIsA = summary.askerName === participantAName;
@@ -283,8 +303,7 @@ async function main() {
   }
 
   const finalScoreboardPath = path.join(matchDir, "final", "scoreboard.md");
-  const finalScoreboardExists = await fileExists(finalScoreboardPath);
-  if (finalScoreboardExists) {
+  if (await fileExists(finalScoreboardPath)) {
     const scoreboard = await fs.readFile(finalScoreboardPath, "utf8");
     const result = stripCode(parseBulletFields(scoreboard)["Result"]);
     events.push(
@@ -333,26 +352,28 @@ async function main() {
   );
 }
 
-async function readSessionMessages(filePath) {
-  const raw = JSON.parse(await fs.readFile(filePath, "utf8"));
+async function readSessionMessages(filePath: string): Promise<Array<Record<string, unknown>>> {
+  const raw = JSON.parse(await fs.readFile(filePath, "utf8")) as {
+    messages?: Array<Record<string, unknown>>;
+  };
   return Array.isArray(raw.messages) ? raw.messages : [];
 }
 
-function buildPromptExchanges(messages) {
-  const exchanges = [];
-  let pendingUser = null;
+function buildPromptExchanges(messages: Array<Record<string, unknown>>): PromptExchange[] {
+  const exchanges: PromptExchange[] = [];
+  let pendingUser: PromptExchange | null = null;
 
   for (const message of messages) {
-    if (message?.User) {
+    if (message.User && typeof message.User === "object") {
       pendingUser = {
-        promptText: collectUserText(message.User),
+        promptText: collectUserText(message.User as Record<string, unknown>),
       };
       continue;
     }
-    if (message?.Agent) {
+    if (message.Agent && typeof message.Agent === "object") {
       exchanges.push({
         promptText: pendingUser?.promptText ?? "(prompt unavailable)",
-        agentMessage: message.Agent,
+        agentMessage: message.Agent as Record<string, unknown>,
       });
       pendingUser = null;
     }
@@ -361,16 +382,20 @@ function buildPromptExchanges(messages) {
   return exchanges;
 }
 
-function collectUserText(userMessage) {
-  const content = Array.isArray(userMessage?.content) ? userMessage.content : [];
+function collectUserText(userMessage: Record<string, unknown>): string {
+  const content = Array.isArray(userMessage.content) ? userMessage.content : [];
   return content
-    .map((part) => (part && typeof part.Text === "string" ? part.Text : ""))
+    .map((part) =>
+      part && typeof part === "object" && typeof (part as { Text?: unknown }).Text === "string"
+        ? ((part as { Text: string }).Text ?? "")
+        : "",
+    )
     .filter((text) => text.trim().length > 0)
     .join("\n\n")
     .trim();
 }
 
-async function fileExists(filePath) {
+async function fileExists(filePath: string): Promise<boolean> {
   try {
     await fs.access(filePath);
     return true;
@@ -379,7 +404,7 @@ async function fileExists(filePath) {
   }
 }
 
-function requireSingle(files, pattern) {
+function requireSingle(files: string[], pattern: RegExp): string {
   const matches = files.filter((file) => pattern.test(file));
   if (matches.length !== 1) {
     throw new Error(`Expected exactly one match for ${pattern}, got ${matches.length}`);
@@ -387,22 +412,22 @@ function requireSingle(files, pattern) {
   return matches[0];
 }
 
-function parseBulletFields(markdown) {
-  const fields = {};
+function parseBulletFields(markdown: string): Record<string, string> {
+  const fields: Record<string, string> = {};
   for (const line of markdown.split("\n")) {
     const match = line.match(/^- ([^:]+): (.+)$/);
     if (match) {
-      fields[match[1].trim()] = match[2].trim();
+      fields[match[1]?.trim() ?? ""] = match[2]?.trim() ?? "";
     }
   }
   return fields;
 }
 
-function stripCode(value) {
+function stripCode(value: string | undefined): string {
   return String(value ?? "").trim().replace(/^`|`$/g, "");
 }
 
-function extractSection(markdown, title) {
+function extractSection(markdown: string, title: string): string {
   const marker = `## ${title}`;
   const start = markdown.indexOf(marker);
   if (start === -1) {
@@ -419,7 +444,7 @@ function extractSection(markdown, title) {
   return content.trim();
 }
 
-function parseListSection(sectionText) {
+function parseListSection(sectionText: string): string[] {
   const items = sectionText
     .split("\n")
     .map((line) => line.trim())
@@ -428,12 +453,12 @@ function parseListSection(sectionText) {
   return items.filter((item) => item !== "(none)");
 }
 
-function normalizeOptionalText(value) {
+function normalizeOptionalText(value: string | undefined): string | null {
   const text = String(value ?? "").trim();
   return text === "" || text === "(none)" ? null : text;
 }
 
-function parsePhase(label) {
+function parsePhase(label: string): TranscriptPhase {
   return label === "sudden death" ? "sudden_death" : "standard";
 }
 

@@ -1,0 +1,14 @@
+{
+  "name": "ai-battle",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "backfill": "tsx scripts/backfill-run-artifacts.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.14",
+    "tsx": "^4.19.3",
+    "typescript": "^5.8.3"
+  }
+}
