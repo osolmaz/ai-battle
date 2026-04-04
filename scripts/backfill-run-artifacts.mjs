@@ -149,7 +149,7 @@ async function main() {
   const nextEventId = (prefix) => `${prefix}-${String(eventCounter++).padStart(6, "0")}`;
   const events = [];
 
-  const appendExchange = (exchange, speakerName, speakerRole, turn, phase, promptKind) => {
+  const appendExchange = (exchange, speakerName, speakerRole, turn, phase, promptType) => {
     if (!exchange) {
       return;
     }
@@ -160,7 +160,7 @@ async function main() {
         turn,
         phase,
         recipientName: speakerName,
-        promptKind,
+        promptType,
         body: exchange.promptText,
       }),
     );
@@ -173,7 +173,7 @@ async function main() {
           speakerName,
           speakerRole,
           promptEventId,
-          promptKind,
+          promptType,
           agentMessage: exchange.agentMessage,
         }),
       );
