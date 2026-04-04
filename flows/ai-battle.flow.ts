@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { acp, action, compute, defineFlow, extractJsonObject } from "acpx/flows";
+import { action, compute, defineFlow, extractJsonObject } from "acpx/flows";
 
 type AiBattleInput = {
   battleRepo?: string;
@@ -100,8 +100,10 @@ type MatchState = {
   judgeName: string;
   participantAAgentCommand: string;
   participantBAgentCommand: string;
+  judgeAgentCommand: string;
   participantASessionName: string;
   participantBSessionName: string;
+  judgeSessionName: string;
   participantAFileStem: string;
   participantBFileStem: string;
   judgeFileStem: string;
@@ -212,10 +214,6 @@ type ParticipantPromptFailure = {
 
 type ParticipantPromptResult<T> = ParticipantPromptSuccess<T> | ParticipantPromptFailure;
 
-const JUDGE_SESSION = {
-  handle: "judge",
-};
-
 const PARTICIPANT_TURN_TIMEOUT_MS = 30 * 60_000;
 const PARTICIPANT_GRACE_TIMEOUT_MS = 60_000;
 const BRIEFING_TIMEOUT_MS = 20 * 60_000;
@@ -281,14 +279,15 @@ export default defineFlow({
       },
     }),
 
-    brief_judge: acp({
-      profile: "judge",
-      session: JUDGE_SESSION,
-      cwd: ({ outputs }) => prepared(outputs).judgeWorkspaceDir,
+    brief_judge: action({
       timeoutMs: BRIEFING_TIMEOUT_MS,
       statusDetail: "Send the rules and judging rubric to the judge",
-      async prompt({ outputs }) {
-        return judgeBriefingPrompt(prepared(outputs));
+      run: async ({ outputs }) => {
+        const state = prepared(outputs);
+        await sendJudgeInformationalPrompt(state, judgeBriefingPrompt(state), BRIEFING_TIMEOUT_MS);
+        return {
+          acknowledged: true,
+        };
       },
     }),
 
@@ -374,16 +373,10 @@ export default defineFlow({
       run: async ({ outputs }) => await writeAnswerForfeitTurn(writtenQuestion(outputs), outputs),
     }),
 
-    judge_turn: acp({
-      profile: "judge",
-      session: JUDGE_SESSION,
-      cwd: ({ outputs }) => writtenAnswer(outputs).state.judgeWorkspaceDir,
-      timeoutMs: JUDGE_TIMEOUT_MS,
+    judge_turn: action({
+      timeoutMs: JUDGE_TIMEOUT_MS + PARTICIPANT_GRACE_TIMEOUT_MS + 60_000,
       statusDetail: "Ask the judge to rule on the completed turn",
-      async prompt({ outputs }) {
-        return judgePrompt(writtenAnswer(outputs));
-      },
-      parse: (text) => extractJsonObject(text),
+      run: async ({ outputs }) => await runJudgeTurn(writtenAnswer(outputs)),
     }),
 
     write_ruling: action({
@@ -584,20 +577,41 @@ function answerResponseFromActionResult(raw: unknown): AnswerResponse {
 }
 
 function selectWrittenRuling(outputs: Record<string, unknown>): WrittenRuling {
+  const turn = currentTurn(outputs).state.currentTurn;
+  const candidates = [
+    outputs.write_ruling,
+    outputs.write_ask_forfeit_turn,
+    outputs.write_answer_forfeit_turn,
+  ].filter((value): value is WrittenRuling => isWrittenRuling(value));
+
+  const exactMatch = candidates.find((candidate) => candidate.turn === turn);
+  if (exactMatch) {
+    return exactMatch;
+  }
+
+  const latestMatch = candidates.sort((left, right) => right.turn - left.turn)[0];
+  if (latestMatch) {
+    return latestMatch;
+  }
+
+  throw new Error("No ruling output was produced for the current turn.");
+}
+
+function isWrittenRuling(value: unknown): value is WrittenRuling {
   return (
-    (outputs.write_ruling as WrittenRuling | undefined) ??
-    (outputs.write_ask_forfeit_turn as WrittenRuling | undefined) ??
-    (outputs.write_answer_forfeit_turn as WrittenRuling | undefined) ??
-    (() => {
-      throw new Error("No ruling output was produced for the current turn.");
-    })()
+    typeof value === "object" &&
+    value !== null &&
+    "turn" in value &&
+    typeof (value as { turn?: unknown }).turn === "number" &&
+    "outcome" in value &&
+    typeof (value as { outcome?: unknown }).outcome === "string"
   );
 }
 
 async function prepareMatch(input: AiBattleInput): Promise<PreparedMatch> {
   const battleRepo = path.resolve(input.battleRepo ?? process.cwd());
   const scratchRoot = resolveScratchRoot(input.scratchRoot);
-  const agentCommands = await loadParticipantAgentCommands(battleRepo);
+  const agentCommands = await loadAgentCommands(battleRepo);
   const participantAName = input.participantAName?.trim() || "participant-a";
   const participantBName = input.participantBName?.trim() || "participant-b";
   const judgeName = input.judgeName?.trim() || "judge";
@@ -629,6 +643,7 @@ async function prepareMatch(input: AiBattleInput): Promise<PreparedMatch> {
   const judgeWorkspaceDir = path.join(scratchMatchDir, "judge");
   const participantASessionName = `${matchId}-participant-a`;
   const participantBSessionName = `${matchId}-participant-b`;
+  const judgeSessionName = `${matchId}-judge`;
 
   await fs.mkdir(matchDir, { recursive: true });
   await fs.mkdir(participantAWorkspaceDir, { recursive: true });
@@ -653,8 +668,10 @@ async function prepareMatch(input: AiBattleInput): Promise<PreparedMatch> {
     judgeName,
     participantAAgentCommand: agentCommands.participantAAgentCommand,
     participantBAgentCommand: agentCommands.participantBAgentCommand,
+    judgeAgentCommand: agentCommands.judgeAgentCommand,
     participantASessionName,
     participantBSessionName,
+    judgeSessionName,
     participantAFileStem,
     participantBFileStem,
     judgeFileStem,
@@ -772,9 +789,10 @@ function chooseTurn(state: MatchState): TurnSelection {
   };
 }
 
-async function loadParticipantAgentCommands(battleRepo: string): Promise<{
+async function loadAgentCommands(battleRepo: string): Promise<{
   participantAAgentCommand: string;
   participantBAgentCommand: string;
+  judgeAgentCommand: string;
 }> {
   const configPath = path.join(battleRepo, ".acpxrc.json");
   let rawConfig: string;
@@ -799,9 +817,11 @@ async function loadParticipantAgentCommands(battleRepo: string): Promise<{
   const agents = asObject(parsed)?.agents;
   const participantAAgentCommand = readAgentCommandFromConfig(agents, "participant-a", configPath);
   const participantBAgentCommand = readAgentCommandFromConfig(agents, "participant-b", configPath);
+  const judgeAgentCommand = readAgentCommandFromConfig(agents, "judge", configPath);
   return {
     participantAAgentCommand,
     participantBAgentCommand,
+    judgeAgentCommand,
   };
 }
 
@@ -866,36 +886,54 @@ async function runAnswerTurn(
   };
 }
 
+async function runJudgeTurn(turn: WrittenAnswer): Promise<JudgeResponse> {
+  return await sendJudgeStructuredPrompt(
+    turn.state,
+    judgePrompt(turn),
+    judgeGracePrompt(turn),
+    normalizeJudgeResponse,
+  );
+}
+
 async function sendParticipantInformationalPrompt(
   state: MatchState,
   role: MatchRole,
   prompt: string,
-  timeoutMs: number,
+  _timeoutMs: number,
 ): Promise<void> {
   const command = participantAgentCommandForRole(state, role);
   const workspaceDir = participantWorkspaceDirForRole(state, role);
   const sessionName = participantSessionNameForRole(state, role);
 
-  await ensureParticipantSession(command, workspaceDir, sessionName);
-  const result = await runParticipantPromptCommand({
+  await ensureAgentSession(command, workspaceDir, sessionName);
+  const result = await runAgentPromptCommand({
     agentCommand: command,
     workspaceDir,
     sessionName,
     prompt,
-    timeoutMs,
+    noWait: true,
   });
+  assertQueuedInformationalPrompt(result, `participant ${nameForRole(state, role)}`);
+}
 
-  if (result.exitCode === 0) {
-    return;
-  }
-  if (isTimeoutCliResult(result)) {
-    await cancelParticipantPrompt(command, workspaceDir, sessionName);
-    return;
-  }
-
-  throw new Error(
-    `Participant prompt failed for ${nameForRole(state, role)}: ${describeCliFailure(result)}`,
+async function sendJudgeInformationalPrompt(
+  state: MatchState,
+  prompt: string,
+  _timeoutMs: number,
+): Promise<void> {
+  await ensureAgentSession(
+    state.judgeAgentCommand,
+    state.judgeWorkspaceDir,
+    state.judgeSessionName,
   );
+  const result = await runAgentPromptCommand({
+    agentCommand: state.judgeAgentCommand,
+    workspaceDir: state.judgeWorkspaceDir,
+    sessionName: state.judgeSessionName,
+    prompt,
+    noWait: true,
+  });
+  assertQueuedInformationalPrompt(result, "judge");
 }
 
 async function sendParticipantStructuredPrompt<T>(
@@ -911,9 +949,9 @@ async function sendParticipantStructuredPrompt<T>(
   const sessionName = participantSessionNameForRole(state, role);
   const participantName = nameForRole(state, role);
 
-  await ensureParticipantSession(command, workspaceDir, sessionName);
+  await ensureAgentSession(command, workspaceDir, sessionName);
 
-  const mainResult = await runParticipantPromptCommand({
+  const mainResult = await runAgentPromptCommand({
     agentCommand: command,
     workspaceDir,
     sessionName,
@@ -928,10 +966,10 @@ async function sendParticipantStructuredPrompt<T>(
     throw new Error(`${participantName} failed during ${kindLabel} turn: ${mainAttempt.reason}`);
   }
   if (mainAttempt.timedOut) {
-    await cancelParticipantPrompt(command, workspaceDir, sessionName);
+    await cancelAgentPrompt(command, workspaceDir, sessionName);
   }
 
-  const graceResult = await runParticipantPromptCommand({
+  const graceResult = await runAgentPromptCommand({
     agentCommand: command,
     workspaceDir,
     sessionName,
@@ -948,7 +986,7 @@ async function sendParticipantStructuredPrompt<T>(
     );
   }
   if (graceAttempt.timedOut) {
-    await cancelParticipantPrompt(command, workspaceDir, sessionName);
+    await cancelAgentPrompt(command, workspaceDir, sessionName);
   }
 
   return {
@@ -961,6 +999,65 @@ async function sendParticipantStructuredPrompt<T>(
       "Automatic turn loss recorded by the match runner.",
     ].join(" "),
   };
+}
+
+async function sendJudgeStructuredPrompt<T>(
+  state: MatchState,
+  prompt: string,
+  gracePrompt: string,
+  normalize: (raw: unknown) => T,
+): Promise<T> {
+  await ensureAgentSession(
+    state.judgeAgentCommand,
+    state.judgeWorkspaceDir,
+    state.judgeSessionName,
+  );
+
+  const mainResult = await runAgentPromptCommand({
+    agentCommand: state.judgeAgentCommand,
+    workspaceDir: state.judgeWorkspaceDir,
+    sessionName: state.judgeSessionName,
+    prompt,
+    timeoutMs: JUDGE_TIMEOUT_MS,
+  });
+  const mainAttempt = classifyStructuredPromptAttempt(mainResult, normalize);
+  if (mainAttempt.ok) {
+    return mainAttempt.value;
+  }
+  if (mainAttempt.timedOut) {
+    await cancelAgentPrompt(
+      state.judgeAgentCommand,
+      state.judgeWorkspaceDir,
+      state.judgeSessionName,
+    );
+  }
+
+  const graceResult = await runAgentPromptCommand({
+    agentCommand: state.judgeAgentCommand,
+    workspaceDir: state.judgeWorkspaceDir,
+    sessionName: state.judgeSessionName,
+    prompt: gracePrompt,
+    timeoutMs: PARTICIPANT_GRACE_TIMEOUT_MS,
+  });
+  const graceAttempt = classifyStructuredPromptAttempt(graceResult, normalize);
+  if (graceAttempt.ok) {
+    return graceAttempt.value;
+  }
+  if (graceAttempt.timedOut) {
+    await cancelAgentPrompt(
+      state.judgeAgentCommand,
+      state.judgeWorkspaceDir,
+      state.judgeSessionName,
+    );
+  }
+
+  throw new Error(
+    [
+      `Judge did not return a valid ruling.`,
+      `Main attempt: ${mainAttempt.reason}`,
+      `Finalization retry: ${graceAttempt.reason}`,
+    ].join(" "),
+  );
 }
 
 function classifyStructuredPromptAttempt<T>(
@@ -1012,7 +1109,7 @@ function classifyStructuredPromptAttempt<T>(
   };
 }
 
-async function ensureParticipantSession(
+async function ensureAgentSession(
   agentCommand: string,
   workspaceDir: string,
   sessionName: string,
@@ -1038,7 +1135,7 @@ async function ensureParticipantSession(
   }
 }
 
-async function cancelParticipantPrompt(
+async function cancelAgentPrompt(
   agentCommand: string,
   workspaceDir: string,
   sessionName: string,
@@ -1068,25 +1165,26 @@ async function cancelParticipantPrompt(
   }
 }
 
-async function runParticipantPromptCommand(options: {
+async function runAgentPromptCommand(options: {
   agentCommand: string;
   workspaceDir: string;
   sessionName: string;
   prompt: string;
-  timeoutMs: number;
+  timeoutMs?: number;
+  noWait?: boolean;
 }): Promise<CliCommandResult> {
   return await runAcpxCommand({
     args: [
       "--approve-all",
       "--format",
       "quiet",
+      ...(options.timeoutMs ? ["--timeout", String(Math.ceil(options.timeoutMs / 1000))] : []),
       "--cwd",
       options.workspaceDir,
       "--agent",
       options.agentCommand,
-      "--timeout",
-      String(Math.ceil(options.timeoutMs / 1000)),
       "prompt",
+      ...(options.noWait ? ["--no-wait"] : []),
       "-s",
       options.sessionName,
       "-f",
@@ -1094,7 +1192,7 @@ async function runParticipantPromptCommand(options: {
     ],
     cwd: options.workspaceDir,
     stdin: options.prompt,
-    timeoutMs: options.timeoutMs + 15_000,
+    timeoutMs: options.timeoutMs ? options.timeoutMs + 15_000 : 15_000,
   });
 }
 
@@ -1217,6 +1315,16 @@ function describeCliFailure(result: CliCommandResult): string {
     ...(result.stdout ? [`stdout: ${result.stdout}`] : []),
   ];
   return parts.join(", ");
+}
+
+function assertQueuedInformationalPrompt(result: CliCommandResult, label: string): void {
+  if (result.exitCode === 0) {
+    return;
+  }
+
+  throw new Error(
+    `Failed to queue informational prompt for ${label}: ${describeCliFailure(result)}`,
+  );
 }
 
 function asObject(value: unknown): Record<string, unknown> | null {
@@ -1348,6 +1456,21 @@ function askGracePrompt(selection: TurnSelection): string {
     "  }",
     "}",
     "If you do not return valid JSON now, you lose the turn.",
+  ].join("\n");
+}
+
+function judgeGracePrompt(turn: WrittenAnswer): string {
+  return [
+    `Finalization retry for judge ${turn.state.judgeName}.`,
+    "Return your final ruling JSON right now.",
+    "No more tool use.",
+    "You have 1 minute.",
+    "",
+    "Output only one JSON object with this shape:",
+    "{",
+    '  "outcome": "answerer_point" | "asker_point" | "flawed_caught" | "flawed_missed",',
+    '  "reason": "short explanation"',
+    "}",
   ].join("\n");
 }
 
