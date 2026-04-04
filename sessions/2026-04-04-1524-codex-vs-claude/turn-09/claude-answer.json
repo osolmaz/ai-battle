@@ -1,0 +1,9 @@
+{
+  "answer": "958206171",
+  "flawClaim": null,
+  "artifactPaths": [
+    "q9_compute.py",
+    "q9_final.py",
+    "q9_check.py"
+  ]
+}

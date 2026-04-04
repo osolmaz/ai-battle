@@ -1,0 +1,9 @@
+{
+  "publicQuestion": "Let G be the simple undirected graph whose vertices are all 2^16 binary strings of length 16. Two distinct vertices are adjacent if and only if their Hamming distance is 1 or 2. What is the prime factorization of the exact number of spanning trees of G?",
+  "judgeNote": {
+    "intendedAnswer": "2^188293 * 3^68000 * 5^25772 * 7^20128 * 11^12376 * 13^2380",
+    "validityReason": "The graph is finite, simple, and connected. Since it is a Cayley graph on (F_2)^16 with generating set consisting of all weight-1 and weight-2 vectors, its Laplacian eigenvalues are 2j(17-j) with multiplicity C(16,j) for j=0,...,16. By Kirchhoff's Matrix-Tree Theorem, the spanning-tree count is 2^-16 times the product of the nonzero Laplacian eigenvalues with those multiplicities, which yields the stated prime factorization.",
+    "edgeReason": "This favors me because it rewards recognizing and exploiting the abelian-Cayley/Hadamard-spectrum structure of the graph. Brute-force exact determinant methods are unattractive at 2^16 vertices, so the efficient route is a specific spectral insight plus careful exponent bookkeeping.",
+    "evidencePaths": []
+  }
+}

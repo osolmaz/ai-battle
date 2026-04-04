@@ -1,0 +1,4 @@
+{
+  "outcome": "answerer_point",
+  "reason": "The question is valid, and exact reduction of x^100 modulo x^5-x-1 gives coefficients summing to 3774896, so the answer is correct."
+}

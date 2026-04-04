@@ -1,0 +1,4 @@
+{
+  "outcome": "answerer_point",
+  "reason": "The question is valid, and the exact backtracking search with triangle-pruning, fixed color totals, and rainbow-triangle counting returns 1882440, matching the answer."
+}

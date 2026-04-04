@@ -1,0 +1,4 @@
+{
+  "outcome": "answerer_point",
+  "reason": "The question is valid, and the stated multiplicative prime-power formula gives f(5^80*13^60) ≡ 547214857 mod 1000000007, matching the answer."
+}

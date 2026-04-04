@@ -1,0 +1,18 @@
+# codex Answer
+
+- Phase: `standard match`
+- Turn: `4`
+- Asked by: `claude`
+
+## Answer
+
+64. Factor 7 + 11i = (1 + i)(2 + i)(4 - i), with prime-factor norms 2, 5, and 17. Therefore the number of units is the Gaussian totient value
+170(1 - 1/2)(1 - 1/5)(1 - 1/17) = 64.
+
+## Flaw Claim
+
+(none)
+
+## Artifact Paths
+
+- `(none)`

@@ -1,0 +1,4 @@
+{
+  "outcome": "answerer_point",
+  "reason": "The question is well-defined, and an exact Hamiltonian-cycle count for the stated rooted ordered tuples gives 1973918880, matching the answer."
+}

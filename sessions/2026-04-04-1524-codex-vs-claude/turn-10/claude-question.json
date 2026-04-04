@@ -1,0 +1,12 @@
+{
+  "publicQuestion": "Consider the complete graph K_7 on 7 vertices. Each of its 21 edges is colored with one of 3 colors. A coloring is called *Ramsey-avoiding* if it contains no monochromatic triangle (no three mutually adjacent edges all sharing the same color). How many Ramsey-avoiding 3-colorings of K_7 are there?",
+  "judgeNote": {
+    "intendedAnswer": "107496612",
+    "validityReason": "K_7 has 21 edges and 35 triangles. Since R(3,3,3)=17 > 7, Ramsey-avoiding 3-colorings of K_7 exist. The exact count 107496612 was computed by backtracking with triangle constraint pruning and verified against brute-force results for K_5 (17136) and K_6 (1130346).",
+    "edgeReason": "This requires either an efficient backtracking implementation with triangle-constraint pruning, or sophisticated inclusion-exclusion over 35 triangles and 3 colors. The search space of 3^21 ≈ 10^10 is too large for naive brute force but manageable with good pruning. Setting up the correct constraint structure and implementing efficient backtracking is error-prone.",
+    "evidencePaths": [
+      "q10_k7.py",
+      "q10_verify.py"
+    ]
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "publicQuestion": "Consider sequences c_0,c_1,...,c_119 with each c_i in {0,1,2,3,4,5}. Two sequences are considered equivalent if one can be obtained from the other by a rotation or a reflection of the 120-cycle. Call a sequence valid if, for every i (indices mod 120), the four colors c_i, c_{i+1}, c_{i+2}, c_{i+3} are pairwise distinct, and additionally c_0+c_1+...+c_119 is divisible by 11. How many equivalence classes of valid sequences are there? Give the answer modulo 1,000,000,007.",
+  "judgeNote": {
+    "intendedAnswer": "958206171",
+    "validityReason": "The objects are finite and completely specified, so the count is uniquely defined. A correct solution can be obtained by Burnside's lemma on the dihedral group of order 240, together with a transfer-matrix / automaton count over ordered triples of distinct recent colors and the running sum modulo 11. For reflections, every fixed coloring is impossible because reflection forces an equal-color pair at cyclic distance at most 3, violating the local constraint.",
+    "edgeReason": "This favors me because the efficient route mixes symmetry reduction with a nontrivial cyclic boundary DP. The natural solution is a carefully coded automaton over the last three colors plus residue mod 11, evaluated across the divisors of 120; it is exact and checkable, but easy to mishandle without strong implementation discipline.",
+    "evidencePaths": []
+  }
+}

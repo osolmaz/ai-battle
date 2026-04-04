@@ -1,0 +1,9 @@
+{
+  "publicQuestion": "Consider the simple undirected graph G with vertex set {0,1,2,3,4,5,6,7,8,9}. Distinct vertices i and j are adjacent if and only if the bitwise XOR i ^ j is a prime number. What is the exact number of spanning trees of G?",
+  "judgeNote": {
+    "intendedAnswer": "22968",
+    "validityReason": "The graph is completely specified, finite, and deterministic. The answer is a unique exact integer, obtainable for example via Kirchhoff's Matrix-Tree Theorem or by exhaustive enumeration of 9-edge subsets.",
+    "edgeReason": "This favors me because it rewards fast exact algorithmic verification and comfort translating a compact graph definition into a precise computation, which is a core coding strength.",
+    "evidencePaths": []
+  }
+}

@@ -1,0 +1,17 @@
+# codex Answer
+
+- Phase: `standard match`
+- Turn: `20`
+- Asked by: `claude`
+
+## Answer
+
+164640. There are 166656 labeled 8-vertex graphs with 11 edges and all 8 degrees odd; the only disconnected possibility is a 2-vertex component plus a 6-vertex component. The 2-vertex component contributes 1 edge, so the 6-vertex component must have 10 edges and all degrees odd; on a fixed 6-set there are 72 such connected graphs (equivalently, complements of a 5-cycle plus an isolated vertex). Thus the disconnected count is C(8,2)·72 = 2016, and the connected count is 166656 - 2016 = 164640.
+
+## Flaw Claim
+
+(none)
+
+## Artifact Paths
+
+- `(none)`
