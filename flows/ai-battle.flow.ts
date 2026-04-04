@@ -103,7 +103,7 @@ type MatchMessageEvent = {
   speakerRole: "participant" | "judge" | "runner";
   recipientName: string;
   eventType: MatchMessageEventType;
-  promptKind?: string;
+  promptType?: string;
   promptEventId?: string;
   body: string;
   structuredData?: unknown;
@@ -113,7 +113,7 @@ type PendingTranscriptPrompt = {
   promptEventId: string;
   turn: number;
   phase: MatchPhase;
-  promptKind: string;
+  promptType: string;
   recipientName: string;
 };
 
@@ -991,7 +991,7 @@ async function runJudgeTurn(turn: WrittenAnswer): Promise<JudgeResponse> {
 async function sendParticipantInformationalPrompt(
   state: MatchState,
   role: MatchRole,
-  promptKind: string,
+  promptType: string,
   prompt: string,
   turn: number,
   phase: MatchPhase,
@@ -1002,7 +1002,7 @@ async function sendParticipantInformationalPrompt(
   const sessionName = participantSessionNameForRole(state, role);
 
   await ensureAgentSession(command, workspaceDir, sessionName);
-  await recordRunnerPrompt(state, role, promptKind, prompt, turn, phase);
+  await recordRunnerPrompt(state, role, promptType, prompt, turn, phase);
   const result = await runAgentPromptCommand({
     agentCommand: command,
     workspaceDir,
@@ -1016,7 +1016,7 @@ async function sendParticipantInformationalPrompt(
 
 async function sendJudgeInformationalPrompt(
   state: MatchState,
-  promptKind: string,
+  promptType: string,
   prompt: string,
   turn: number,
   phase: MatchPhase,
@@ -1027,7 +1027,7 @@ async function sendJudgeInformationalPrompt(
     state.judgeWorkspaceDir,
     state.judgeSessionName,
   );
-  await recordRunnerPrompt(state, "judge", promptKind, prompt, turn, phase);
+  await recordRunnerPrompt(state, "judge", promptType, prompt, turn, phase);
   const result = await runAgentPromptCommand({
     agentCommand: state.judgeAgentCommand,
     workspaceDir: state.judgeWorkspaceDir,
@@ -1045,7 +1045,7 @@ async function sendParticipantStructuredPrompt<T>(
   prompt: string,
   gracePrompt: string,
   normalize: (raw: unknown) => T,
-  kindLabel: "question" | "answer",
+  promptTypeLabel: "question" | "answer",
 ): Promise<ParticipantPromptResult<T>> {
   const command = participantAgentCommandForRole(state, role);
   const workspaceDir = participantWorkspaceDirForRole(state, role);
@@ -1056,7 +1056,7 @@ async function sendParticipantStructuredPrompt<T>(
   await recordRunnerPrompt(
     state,
     role,
-    kindLabel === "question" ? "asking turn" : "answering turn",
+    promptTypeLabel === "question" ? "asking turn" : "answering turn",
     prompt,
     state.currentTurn,
     state.phase,
@@ -1075,7 +1075,9 @@ async function sendParticipantStructuredPrompt<T>(
     return mainAttempt;
   }
   if (!mainAttempt.retryable) {
-    throw new Error(`${participantName} failed during ${kindLabel} turn: ${mainAttempt.reason}`);
+    throw new Error(
+      `${participantName} failed during ${promptTypeLabel} turn: ${mainAttempt.reason}`,
+    );
   }
   if (mainAttempt.timedOut) {
     await cancelAgentPrompt(command, workspaceDir, sessionName);
@@ -1085,14 +1087,14 @@ async function sendParticipantStructuredPrompt<T>(
     role,
     (pendingPrompt) =>
       pendingPrompt.turn === state.currentTurn &&
-      pendingPrompt.promptKind ===
-        (kindLabel === "question" ? "asking turn" : "answering turn"),
+      pendingPrompt.promptType ===
+        (promptTypeLabel === "question" ? "asking turn" : "answering turn"),
   );
 
   await recordRunnerPrompt(
     state,
     role,
-    `${kindLabel === "question" ? "asking turn" : "answering turn"} finalization retry`,
+    `${promptTypeLabel === "question" ? "asking turn" : "answering turn"} finalization retry`,
     gracePrompt,
     state.currentTurn,
     state.phase,
@@ -1111,7 +1113,7 @@ async function sendParticipantStructuredPrompt<T>(
   }
   if (!graceAttempt.retryable) {
     throw new Error(
-      `${participantName} failed during ${kindLabel} grace turn: ${graceAttempt.reason}`,
+      `${participantName} failed during ${promptTypeLabel} grace turn: ${graceAttempt.reason}`,
     );
   }
   if (graceAttempt.timedOut) {
@@ -1122,15 +1124,15 @@ async function sendParticipantStructuredPrompt<T>(
     role,
     (pendingPrompt) =>
       pendingPrompt.turn === state.currentTurn &&
-      pendingPrompt.promptKind ===
-        `${kindLabel === "question" ? "asking turn" : "answering turn"} finalization retry`,
+      pendingPrompt.promptType ===
+        `${promptTypeLabel === "question" ? "asking turn" : "answering turn"} finalization retry`,
   );
 
   return {
     ok: false,
     reason: [
-      `${participantName} did not return a valid ${kindLabel} within the 30-minute turn window.`,
-      `A one-minute finalization retry was sent, but no valid ${kindLabel} was returned.`,
+      `${participantName} did not return a valid ${promptTypeLabel} within the 30-minute turn window.`,
+      `A one-minute finalization retry was sent, but no valid ${promptTypeLabel} was returned.`,
       `Main attempt: ${mainAttempt.reason}`,
       `Finalization retry: ${graceAttempt.reason}`,
       "Automatic turn loss recorded by the match runner.",
@@ -1174,7 +1176,7 @@ async function sendJudgeStructuredPrompt<T>(
     state,
     "judge",
     (pendingPrompt) =>
-      pendingPrompt.turn === state.currentTurn && pendingPrompt.promptKind === "judge turn",
+      pendingPrompt.turn === state.currentTurn && pendingPrompt.promptType === "judge turn",
   );
 
   await recordRunnerPrompt(
@@ -1209,7 +1211,7 @@ async function sendJudgeStructuredPrompt<T>(
     "judge",
     (pendingPrompt) =>
       pendingPrompt.turn === state.currentTurn &&
-      pendingPrompt.promptKind === "judge finalization retry",
+      pendingPrompt.promptType === "judge finalization retry",
   );
 
   throw new Error(
@@ -2258,7 +2260,7 @@ function dropPendingTranscriptPrompt(
 async function recordRunnerPrompt(
   state: MatchState,
   target: TranscriptTarget,
-  promptKind: string,
+  promptType: string,
   prompt: string,
   turn: number,
   phase: MatchPhase,
@@ -2271,7 +2273,7 @@ async function recordRunnerPrompt(
       turn,
       phase,
       recipientName: transcriptSpeakerNameForTarget(state, target),
-      promptKind,
+      promptType,
       body: prompt,
     }) as MatchMessageEvent,
   );
@@ -2280,7 +2282,7 @@ async function recordRunnerPrompt(
     promptEventId: eventId,
     turn,
     phase,
-    promptKind,
+    promptType,
     recipientName: transcriptSpeakerNameForTarget(state, target),
   });
 }
@@ -2345,7 +2347,7 @@ async function syncTranscriptSession(
         promptEventId: nextTranscriptEventId(state, "orphan-prompt"),
         turn: state.currentTurn,
         phase: state.phase,
-        promptKind: "session reply",
+        promptType: "session reply",
         recipientName: transcriptSpeakerNameForTarget(state, target),
       };
 
@@ -2358,7 +2360,7 @@ async function syncTranscriptSession(
         speakerName: transcriptSpeakerNameForTarget(state, target),
         speakerRole: transcriptSpeakerRoleForTarget(target),
         promptEventId: pendingPrompt.promptEventId,
-        promptKind: pendingPrompt.promptKind,
+        promptType: pendingPrompt.promptType,
         agentMessage,
       }) as MatchMessageEvent,
     );

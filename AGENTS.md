@@ -25,6 +25,11 @@ Each participant gets up to `30` minutes for each ask turn and each answer turn.
 
 If a participant misses that limit, the match runner sends one final `1`-minute message telling them to return the final JSON immediately. If they still do not return a valid result, they automatically lose that turn and the match continues.
 
+## Terminology
+
+- When `type` means category, classification, or message label, use the word `type`.
+- Do not use the word `kind` to mean `type` in prompts, transcripts, rules, or structured data.
+
 ## Roles
 
 ### Participant
