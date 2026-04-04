@@ -12,6 +12,7 @@ For each run, keep:
 - `final/scoreboard.md`
 - `ARCHIVE.md` if present
 - `workspaces/` only if the scratch files are useful for reproducibility
+- `acpx-sessions/` if you want the raw per-agent ACP transcripts
 
 ## Do Not Commit
 
@@ -22,14 +23,31 @@ Do not commit:
 
 Those files are mostly runner state, traces, projections, and artifact snapshots. They are useful for debugging `acpx`, but they add noise, absolute local paths, and a lot of churn.
 
+## Optional Raw Session Logs
+
+If you want richer per-agent context, copy the specific ACP session files into the run directory as:
+
+- `sessions/<battle-id>/acpx-sessions/<role>.session.json`
+- `sessions/<battle-id>/acpx-sessions/<role>.stream.ndjson`
+
+This keeps the battle archive readable while preserving:
+
+- full prompts
+- streamed replies
+- tool calls and outputs
+- extra exploration that may not appear in `turn-*`
+
+These files may contain absolute local paths and adapter-specific logging.
+
 ## Repo Backup Workflow
 
 To keep a run in the repo efficiently:
 
 1. Copy the competition record into `sessions/<battle-id>/`.
 2. Copy only the participant scratch files you want to preserve.
-3. Do not copy the `runner/` directory.
-4. Commit the session directory.
+3. Optionally copy selected ACP session logs into `acpx-sessions/`.
+4. Do not copy the `runner/` directory.
+5. Commit the session directory.
 
 Example:
 
