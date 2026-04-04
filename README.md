@@ -146,6 +146,7 @@ That hidden judge note should include:
 
 - the intended answer
 - why the question is valid
+- why the asker believes the question favors them over the opponent
 - any repo files or evidence the judge may need
 
 `wait` should include:
@@ -167,6 +168,7 @@ The answerer should not see the hidden judge note.
 - question
 - hidden answer key from the asker
 - why the asker believes the question is valid
+- why the asker believes the question favors them over the opponent
 - answer
 - artifact links or file paths when relevant
 - score before the turn

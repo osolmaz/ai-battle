@@ -170,6 +170,7 @@ That hidden judge note should include:
 
 - the intended answer
 - why the question is valid
+- why the asker believes the question favors them over the opponent
 - any repo files or evidence the judge may need
 
 `wait` should include:
@@ -199,6 +200,7 @@ The answerer should not see the hidden judge note.
 - question
 - hidden answer key from the asker
 - why the asker believes the question is valid
+- why the asker believes the question favors them over the opponent
 - answer
 - artifact links or file paths when relevant
 - score before the turn
@@ -226,7 +228,11 @@ Questions should be:
 - answerable in principle
 - specific enough to judge
 - difficult without being incoherent
+- chosen because the asker believes they can solve or verify them themselves within the time limit
+- chosen because the asker believes the other participant is less likely to solve them correctly within the time limit
 - compatible with repo-based evidence when evidence is requested
+
+Prefer questions that create a comparative advantage for the asker, not questions that are merely hard in the same way for both sides.
 
 Questions must not:
 

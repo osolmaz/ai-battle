@@ -65,6 +65,7 @@ async function main() {
     const questionText = extractSection(questionMd, "Question");
     const intendedAnswer = extractSection(judgeNoteMd, "Intended Answer");
     const validityReason = extractSection(judgeNoteMd, "Validity Reason");
+    const edgeReason = normalizeOptionalText(extractSection(judgeNoteMd, "Comparative Edge Reason"));
     const evidencePaths = parseListSection(extractSection(judgeNoteMd, "Evidence Paths"));
     const answerText = extractSection(answerMd, "Answer");
     const flawClaimText = extractSection(answerMd, "Flaw Claim");
@@ -82,6 +83,7 @@ async function main() {
       judgeNote: {
         intendedAnswer,
         validityReason,
+        ...(edgeReason ? { edgeReason } : {}),
         evidencePaths,
       },
     };

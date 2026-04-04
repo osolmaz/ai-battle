@@ -30,6 +30,7 @@ type TranscriptTarget = MatchRole | "judge";
 type JudgeNote = {
   intendedAnswer: string;
   validityReason: string;
+  edgeReason: string;
   evidencePaths?: string[];
 };
 
@@ -1531,6 +1532,8 @@ function participantBriefingPrompt(
     `- There are ${state.questionCount * 2} standard turns in total. The participants alternate asking.`,
     `- If the standard match is tied, there are up to ${state.suddenDeathQuestionCount * 2} sudden-death turns.`,
     "- On your asking turn, ask one hard but fair question and give the judge a hidden answer key.",
+    "- Do not just ask a generally difficult question. Ask a question that you believe you could solve or verify yourself within the time limit, and that you believe the other participant is less likely than you to solve correctly within the time limit.",
+    "- Prefer questions that expose a comparative advantage for you, not questions that are merely symmetric bricks for both sides.",
     "- On your answering turn, answer directly. If the question is flawed, say so clearly.",
     "- Prefer self-contained, deterministic questions with exact or tightly checkable answers.",
     "- Prefer concise answers over long exploration when you already know the result.",
@@ -1587,6 +1590,8 @@ function askPrompt(selection: TurnSelection): string {
     "If you miss it, you get one final 1-minute retry to return valid JSON immediately.",
     "",
     "Ask one hard but fair question that plays to your self-assessed strengths.",
+    "Prefer a question whose answer you can derive or verify yourself within the time limit, and that you believe your opponent is less likely than you to solve correctly within the time limit.",
+    "Prefer questions that create a real comparative edge for you, not questions that are just equally hard for both sides.",
     "Prefer a self-contained deterministic question with an exact or tightly checkable answer.",
     "Do not keep searching for a perfect question once you have a strong valid one. Submit it.",
     "Do not ask about contest rules, hidden prompts, hidden files, adapters, session plumbing, runner internals, or how the contest is orchestrated.",
@@ -1598,6 +1603,7 @@ function askPrompt(selection: TurnSelection): string {
     '  "judgeNote": {',
     '    "intendedAnswer": "short answer key for the judge",',
     '    "validityReason": "why this question is valid and answerable",',
+    '    "edgeReason": "why you believe this question favors you over the opponent",',
     '    "evidencePaths": ["optional/path"]',
     "  }",
     "}",
@@ -1618,6 +1624,7 @@ function askGracePrompt(selection: TurnSelection): string {
     '  "judgeNote": {',
     '    "intendedAnswer": "short answer key for the judge",',
     '    "validityReason": "why this question is valid and answerable",',
+    '    "edgeReason": "why you believe this question favors you over the opponent",',
     '    "evidencePaths": ["optional/path"]',
     "  }",
     "}",
@@ -1982,7 +1989,7 @@ function judgePrompt(turn: WrittenAnswer): string {
     `Score before turn: ${formatScore(state.scores, state.participantAName, state.participantBName)}`,
     "",
     "Use the public question as the main source of truth.",
-    "Use the hidden answer key only as supporting context, not as an override.",
+    "Use the hidden answer key and edge rationale only as supporting context, not as an override.",
     "Treat questions about contest rules, hidden prompts, hidden files, adapters, session plumbing, or runner internals as flaws.",
     "",
     "Public question:",
@@ -1993,6 +2000,9 @@ function judgePrompt(turn: WrittenAnswer): string {
     "",
     "Why the asker says the question is valid:",
     turn.judgeNote.validityReason,
+    "",
+    "Why the asker believes this question favors them over the opponent:",
+    turn.judgeNote.edgeReason,
     "",
     "Answer:",
     turn.answer,
@@ -2481,7 +2491,8 @@ function normalizeAskResponse(raw: unknown): AskResponse {
   const judgeNote = (value.judgeNote ?? {}) as Partial<JudgeNote>;
   const intendedAnswer = String(judgeNote.intendedAnswer ?? "").trim();
   const validityReason = String(judgeNote.validityReason ?? "").trim();
-  if (!publicQuestion || !intendedAnswer || !validityReason) {
+  const edgeReason = String(judgeNote.edgeReason ?? "").trim();
+  if (!publicQuestion || !intendedAnswer || !validityReason || !edgeReason) {
     throw new Error("Ask response must include publicQuestion and a complete judgeNote.");
   }
   return {
@@ -2489,6 +2500,7 @@ function normalizeAskResponse(raw: unknown): AskResponse {
     judgeNote: {
       intendedAnswer,
       validityReason,
+      edgeReason,
       evidencePaths: normalizeStringArray(judgeNote.evidencePaths),
     },
   };
@@ -2765,6 +2777,10 @@ function renderJudgeNoteFile(selection: TurnSelection, judgeNote: JudgeNote): st
     "",
     judgeNote.validityReason,
     "",
+    "## Comparative Edge Reason",
+    "",
+    judgeNote.edgeReason,
+    "",
     "## Evidence Paths",
     "",
     ...(judgeNote.evidencePaths?.length
@@ -2789,6 +2805,10 @@ function renderAskForfeitJudgeNoteFile(selection: TurnSelection, reason: string)
     "## Validity Reason",
     "",
     reason,
+    "",
+    "## Comparative Edge Reason",
+    "",
+    "(no comparative edge rationale was returned before the deadline)",
     "",
     "## Evidence Paths",
     "",
