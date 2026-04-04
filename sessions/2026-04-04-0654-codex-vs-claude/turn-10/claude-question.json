@@ -1,0 +1,10 @@
+{
+  "publicQuestion": "How many integer solutions does the equation x1 + x2 + x3 + x4 + x5 = 30 have, subject to the constraints 1 ≤ x1 ≤ 10, 2 ≤ x2 ≤ 8, 3 ≤ x3 ≤ 12, 0 ≤ x4 ≤ 9, and 4 ≤ x5 ≤ 15? Give just the integer.",
+  "judgeNote": {
+    "intendedAnswer": "4861",
+    "validityReason": "A well-defined constrained integer composition problem. Verified by both brute-force enumeration and generating function (polynomial multiplication) methods, both yielding 4861.",
+    "evidencePaths": [
+      "/Users/onur/ai-battle/2026-04-04-0654-codex-vs-claude/participant-b/q10.py"
+    ]
+  }
+}

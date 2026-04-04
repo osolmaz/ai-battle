@@ -1,0 +1,11 @@
+{
+  "publicQuestion": "How many Standard Young Tableaux of shape (7, 5, 4, 3, 1) are there? A Standard Young Tableau of shape λ = (λ₁, λ₂, ..., λₖ) is a filling of the Young diagram (λ₁ cells in row 1, λ₂ cells in row 2, etc., left-justified) with the integers 1 through n (where n = λ₁ + λ₂ + ... + λₖ = 20) such that entries strictly increase along each row from left to right and strictly increase down each column. Give just the integer.",
+  "judgeNote": {
+    "intendedAnswer": "154313250",
+    "validityReason": "Standard Young Tableaux are a well-defined combinatorial object. The count is given by the hook length formula: 20! / (product of all hook lengths). Verified independently by both the hook length formula (yielding 20!/15765995520 = 154313250) and recursive enumeration with memoization.",
+    "evidencePaths": [
+      "/Users/onur/ai-battle/2026-04-04-0654-codex-vs-claude/participant-b/q16e.py",
+      "/Users/onur/ai-battle/2026-04-04-0654-codex-vs-claude/participant-b/q16e_verify.py"
+    ]
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "publicQuestion": "How many distinct Eulerian circuits start and end at vertex 1 in the directed graph on vertices {1,2,3,4,5,6,7,8,9,10} with directed edges (1,2), (1,5), (1,8), (2,4), (2,7), (2,10), (3,1), (3,8), (3,6), (4,3), (4,2), (4,7), (5,3), (5,4), (5,10), (6,5), (6,2), (6,9), (7,1), (7,6), (7,3), (8,7), (8,9), (8,4), (9,10), (9,6), (9,8), (10,9), (10,5), (10,1)? Here, an Eulerian circuit is a directed edge sequence that begins at vertex 1, ends at vertex 1, follows edge directions, and uses each listed directed edge exactly once. Two circuits are considered different if their directed edge sequences differ. Give just the integer.",
+  "judgeNote": {
+    "intendedAnswer": "5027840",
+    "validityReason": "The directed graph is fully specified, finite, and Eulerian, and the counting convention fixes the starting vertex and treats distinct edge sequences as distinct circuits, so the answer is a well-defined exact integer. It can be verified by the BEST theorem, or independently by brute-force counting rooted in-arborescences into vertex 1 (only 3^9 choices here) and multiplying by the standard factorial factor.",
+    "evidencePaths": []
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "publicQuestion": "How many integer partitions of 100 into exactly 7 distinct positive parts are there? That is, how many ways can 100 be written as a1 + a2 + a3 + a4 + a5 + a6 + a7 where a1 > a2 > a3 > a4 > a5 > a6 > a7 ≥ 1? Give just the integer.",
+  "judgeNote": {
+    "intendedAnswer": "108869",
+    "validityReason": "This is a well-defined integer partition counting problem. Verified by two independent methods: recursive memoized search and 0-1 knapsack DP over values, both yielding 108869. Also cross-validated on smaller cases (partitions of 10 into 3 distinct parts = 4, partitions of 15 into 4 distinct parts = 6).",
+    "evidencePaths": [
+      "/Users/onur/ai-battle/2026-04-04-0654-codex-vs-claude/participant-b/q14b.py",
+      "/Users/onur/ai-battle/2026-04-04-0654-codex-vs-claude/participant-b/q14_verify.py"
+    ]
+  }
+}

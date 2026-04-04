@@ -4,6 +4,12 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { action, compute, defineFlow, extractJsonObject } from "acpx/flows";
+import {
+  buildAgentReplyEvent,
+  buildRunnerNoticeEvent,
+  buildRunnerPromptEvent,
+  renderTranscript as renderHearingTranscript,
+} from "../lib/hearing-transcript.js";
 
 type AiBattleInput = {
   battleRepo?: string;
@@ -19,6 +25,7 @@ type AiBattleInput = {
 
 type MatchRole = "participant_a" | "participant_b";
 type MatchPhase = "standard" | "sudden_death";
+type TranscriptTarget = MatchRole | "judge";
 
 type JudgeNote = {
   intendedAnswer: string;
@@ -73,14 +80,47 @@ type TurnRecord = {
   askerName: string;
   answererName: string;
   questionPath: string;
+  questionJsonPath: string;
   judgeNotePath: string;
   answerPath: string;
+  answerJsonPath: string;
   rulingPath: string;
+  rulingJsonPath: string;
   outcome: TurnOutcome;
   reason: string;
   askerDelta: number;
   answererDelta: number;
   updatedScores: ScoreState;
+};
+
+type MatchMessageEventType = "runner_prompt" | "agent_reply" | "runner_notice";
+
+type MatchMessageEvent = {
+  eventId: string;
+  turn: number;
+  phase: MatchPhase;
+  speakerName: string;
+  speakerRole: "participant" | "judge" | "runner";
+  recipientName: string;
+  eventType: MatchMessageEventType;
+  promptKind?: string;
+  promptEventId?: string;
+  body: string;
+  structuredData?: unknown;
+};
+
+type PendingTranscriptPrompt = {
+  promptEventId: string;
+  turn: number;
+  phase: MatchPhase;
+  promptKind: string;
+  recipientName: string;
+};
+
+type SessionTranscriptTracker = {
+  processedMessageCount: number;
+  pendingPrompts: PendingTranscriptPrompt[];
+  sessionRecordPath?: string;
 };
 
 type MatchState = {
@@ -95,6 +135,8 @@ type MatchState = {
   matchId: string;
   matchDir: string;
   manifestPath: string;
+  transcriptPath: string;
+  messageLogPath: string;
   participantAName: string;
   participantBName: string;
   judgeName: string;
@@ -119,6 +161,10 @@ type MatchState = {
   scores: ScoreState;
   latestRuling: RulingSummary | null;
   history: TurnRecord[];
+  nextTranscriptEventId: number;
+  participantATranscript: SessionTranscriptTracker;
+  participantBTranscript: SessionTranscriptTracker;
+  judgeTranscript: SessionTranscriptTracker;
 };
 
 type PreparedMatch = MatchState;
@@ -144,6 +190,7 @@ type WrittenQuestion = {
   publicQuestion: string;
   judgeNote: JudgeNote;
   questionPath: string;
+  questionJsonPath: string;
   judgeNotePath: string;
 };
 
@@ -160,8 +207,10 @@ type WrittenAnswer = {
   flawClaim: string | null;
   artifactPaths: string[];
   questionPath: string;
+  questionJsonPath: string;
   judgeNotePath: string;
   answerPath: string;
+  answerJsonPath: string;
 };
 
 type WrittenRuling = {
@@ -177,9 +226,12 @@ type WrittenRuling = {
   askerDelta: number;
   answererDelta: number;
   rulingPath: string;
+  rulingJsonPath: string;
   questionPath: string;
+  questionJsonPath: string;
   judgeNotePath: string;
   answerPath: string;
+  answerJsonPath: string;
 };
 
 type AskTurnActionResult =
@@ -249,9 +301,12 @@ export default defineFlow({
         await sendParticipantInformationalPrompt(
           state,
           "participant_a",
+          "rules briefing",
           participantBriefingPrompt(state, {
             role: "participant_a",
           }),
+          0,
+          "standard",
           BRIEFING_TIMEOUT_MS,
         );
         return {
@@ -268,9 +323,12 @@ export default defineFlow({
         await sendParticipantInformationalPrompt(
           state,
           "participant_b",
+          "rules briefing",
           participantBriefingPrompt(state, {
             role: "participant_b",
           }),
+          0,
+          "standard",
           BRIEFING_TIMEOUT_MS,
         );
         return {
@@ -284,7 +342,14 @@ export default defineFlow({
       statusDetail: "Send the rules and judging rubric to the judge",
       run: async ({ outputs }) => {
         const state = prepared(outputs);
-        await sendJudgeInformationalPrompt(state, judgeBriefingPrompt(state), BRIEFING_TIMEOUT_MS);
+        await sendJudgeInformationalPrompt(
+          state,
+          "rules briefing",
+          judgeBriefingPrompt(state),
+          0,
+          "standard",
+          BRIEFING_TIMEOUT_MS,
+        );
         return {
           acknowledged: true,
         };
@@ -315,7 +380,10 @@ export default defineFlow({
         await sendParticipantInformationalPrompt(
           selection.state,
           "participant_a",
+          "wait notice",
           waitPrompt(selection, "participant_a"),
+          selection.state.currentTurn,
+          selection.state.phase,
           SHORT_ACK_TIMEOUT_MS,
         );
         return {
@@ -332,7 +400,10 @@ export default defineFlow({
         await sendParticipantInformationalPrompt(
           selection.state,
           "participant_b",
+          "wait notice",
           waitPrompt(selection, "participant_b"),
+          selection.state.currentTurn,
+          selection.state.phase,
           SHORT_ACK_TIMEOUT_MS,
         );
         return {
@@ -396,7 +467,10 @@ export default defineFlow({
         await sendParticipantInformationalPrompt(
           ruling.state,
           "participant_a",
+          "ruling notice",
           rulingNotificationPrompt(ruling, "participant_a"),
+          ruling.turn,
+          ruling.phase,
           SHORT_ACK_TIMEOUT_MS,
         );
         return {
@@ -413,7 +487,10 @@ export default defineFlow({
         await sendParticipantInformationalPrompt(
           ruling.state,
           "participant_b",
+          "ruling notice",
           rulingNotificationPrompt(ruling, "participant_b"),
+          ruling.turn,
+          ruling.phase,
           SHORT_ACK_TIMEOUT_MS,
         );
         return {
@@ -608,6 +685,13 @@ function isWrittenRuling(value: unknown): value is WrittenRuling {
   );
 }
 
+function createSessionTranscriptTracker(): SessionTranscriptTracker {
+  return {
+    processedMessageCount: 0,
+    pendingPrompts: [],
+  };
+}
+
 async function prepareMatch(input: AiBattleInput): Promise<PreparedMatch> {
   const battleRepo = path.resolve(input.battleRepo ?? process.cwd());
   const scratchRoot = resolveScratchRoot(input.scratchRoot);
@@ -637,6 +721,8 @@ async function prepareMatch(input: AiBattleInput): Promise<PreparedMatch> {
   );
   const matchDir = path.join(sessionsDir, matchId);
   const manifestPath = path.join(matchDir, "manifest.md");
+  const transcriptPath = path.join(matchDir, "transcript.md");
+  const messageLogPath = path.join(matchDir, "messages.jsonl");
   const scratchMatchDir = path.join(scratchRoot, matchId);
   const participantAWorkspaceDir = path.join(scratchMatchDir, "participant-a");
   const participantBWorkspaceDir = path.join(scratchMatchDir, "participant-b");
@@ -663,6 +749,8 @@ async function prepareMatch(input: AiBattleInput): Promise<PreparedMatch> {
     matchId,
     matchDir,
     manifestPath,
+    transcriptPath,
+    messageLogPath,
     participantAName,
     participantBName,
     judgeName,
@@ -690,9 +778,14 @@ async function prepareMatch(input: AiBattleInput): Promise<PreparedMatch> {
     },
     latestRuling: null,
     history: [],
+    nextTranscriptEventId: 1,
+    participantATranscript: createSessionTranscriptTracker(),
+    participantBTranscript: createSessionTranscriptTracker(),
+    judgeTranscript: createSessionTranscriptTracker(),
   };
 
   await fs.writeFile(manifestPath, renderManifest(initialState), "utf8");
+  await initializeMessageArchive(initialState);
   return initialState;
 }
 
@@ -898,7 +991,10 @@ async function runJudgeTurn(turn: WrittenAnswer): Promise<JudgeResponse> {
 async function sendParticipantInformationalPrompt(
   state: MatchState,
   role: MatchRole,
+  promptKind: string,
   prompt: string,
+  turn: number,
+  phase: MatchPhase,
   _timeoutMs: number,
 ): Promise<void> {
   const command = participantAgentCommandForRole(state, role);
@@ -906,6 +1002,7 @@ async function sendParticipantInformationalPrompt(
   const sessionName = participantSessionNameForRole(state, role);
 
   await ensureAgentSession(command, workspaceDir, sessionName);
+  await recordRunnerPrompt(state, role, promptKind, prompt, turn, phase);
   const result = await runAgentPromptCommand({
     agentCommand: command,
     workspaceDir,
@@ -914,11 +1011,15 @@ async function sendParticipantInformationalPrompt(
     noWait: true,
   });
   assertQueuedInformationalPrompt(result, `participant ${nameForRole(state, role)}`);
+  await syncAllTranscriptSessions(state);
 }
 
 async function sendJudgeInformationalPrompt(
   state: MatchState,
+  promptKind: string,
   prompt: string,
+  turn: number,
+  phase: MatchPhase,
   _timeoutMs: number,
 ): Promise<void> {
   await ensureAgentSession(
@@ -926,6 +1027,7 @@ async function sendJudgeInformationalPrompt(
     state.judgeWorkspaceDir,
     state.judgeSessionName,
   );
+  await recordRunnerPrompt(state, "judge", promptKind, prompt, turn, phase);
   const result = await runAgentPromptCommand({
     agentCommand: state.judgeAgentCommand,
     workspaceDir: state.judgeWorkspaceDir,
@@ -934,6 +1036,7 @@ async function sendJudgeInformationalPrompt(
     noWait: true,
   });
   assertQueuedInformationalPrompt(result, "judge");
+  await syncAllTranscriptSessions(state);
 }
 
 async function sendParticipantStructuredPrompt<T>(
@@ -950,6 +1053,14 @@ async function sendParticipantStructuredPrompt<T>(
   const participantName = nameForRole(state, role);
 
   await ensureAgentSession(command, workspaceDir, sessionName);
+  await recordRunnerPrompt(
+    state,
+    role,
+    kindLabel === "question" ? "asking turn" : "answering turn",
+    prompt,
+    state.currentTurn,
+    state.phase,
+  );
 
   const mainResult = await runAgentPromptCommand({
     agentCommand: command,
@@ -958,6 +1069,7 @@ async function sendParticipantStructuredPrompt<T>(
     prompt,
     timeoutMs: PARTICIPANT_TURN_TIMEOUT_MS,
   });
+  await syncAllTranscriptSessions(state);
   const mainAttempt = classifyStructuredPromptAttempt(mainResult, normalize);
   if (mainAttempt.ok) {
     return mainAttempt;
@@ -968,7 +1080,23 @@ async function sendParticipantStructuredPrompt<T>(
   if (mainAttempt.timedOut) {
     await cancelAgentPrompt(command, workspaceDir, sessionName);
   }
+  dropPendingTranscriptPrompt(
+    state,
+    role,
+    (pendingPrompt) =>
+      pendingPrompt.turn === state.currentTurn &&
+      pendingPrompt.promptKind ===
+        (kindLabel === "question" ? "asking turn" : "answering turn"),
+  );
 
+  await recordRunnerPrompt(
+    state,
+    role,
+    `${kindLabel === "question" ? "asking turn" : "answering turn"} finalization retry`,
+    gracePrompt,
+    state.currentTurn,
+    state.phase,
+  );
   const graceResult = await runAgentPromptCommand({
     agentCommand: command,
     workspaceDir,
@@ -976,6 +1104,7 @@ async function sendParticipantStructuredPrompt<T>(
     prompt: gracePrompt,
     timeoutMs: PARTICIPANT_GRACE_TIMEOUT_MS,
   });
+  await syncAllTranscriptSessions(state);
   const graceAttempt = classifyStructuredPromptAttempt(graceResult, normalize);
   if (graceAttempt.ok) {
     return graceAttempt;
@@ -988,6 +1117,14 @@ async function sendParticipantStructuredPrompt<T>(
   if (graceAttempt.timedOut) {
     await cancelAgentPrompt(command, workspaceDir, sessionName);
   }
+  dropPendingTranscriptPrompt(
+    state,
+    role,
+    (pendingPrompt) =>
+      pendingPrompt.turn === state.currentTurn &&
+      pendingPrompt.promptKind ===
+        `${kindLabel === "question" ? "asking turn" : "answering turn"} finalization retry`,
+  );
 
   return {
     ok: false,
@@ -1012,6 +1149,7 @@ async function sendJudgeStructuredPrompt<T>(
     state.judgeWorkspaceDir,
     state.judgeSessionName,
   );
+  await recordRunnerPrompt(state, "judge", "judge turn", prompt, state.currentTurn, state.phase);
 
   const mainResult = await runAgentPromptCommand({
     agentCommand: state.judgeAgentCommand,
@@ -1020,6 +1158,7 @@ async function sendJudgeStructuredPrompt<T>(
     prompt,
     timeoutMs: JUDGE_TIMEOUT_MS,
   });
+  await syncAllTranscriptSessions(state);
   const mainAttempt = classifyStructuredPromptAttempt(mainResult, normalize);
   if (mainAttempt.ok) {
     return mainAttempt.value;
@@ -1031,7 +1170,21 @@ async function sendJudgeStructuredPrompt<T>(
       state.judgeSessionName,
     );
   }
+  dropPendingTranscriptPrompt(
+    state,
+    "judge",
+    (pendingPrompt) =>
+      pendingPrompt.turn === state.currentTurn && pendingPrompt.promptKind === "judge turn",
+  );
 
+  await recordRunnerPrompt(
+    state,
+    "judge",
+    "judge finalization retry",
+    gracePrompt,
+    state.currentTurn,
+    state.phase,
+  );
   const graceResult = await runAgentPromptCommand({
     agentCommand: state.judgeAgentCommand,
     workspaceDir: state.judgeWorkspaceDir,
@@ -1039,6 +1192,7 @@ async function sendJudgeStructuredPrompt<T>(
     prompt: gracePrompt,
     timeoutMs: PARTICIPANT_GRACE_TIMEOUT_MS,
   });
+  await syncAllTranscriptSessions(state);
   const graceAttempt = classifyStructuredPromptAttempt(graceResult, normalize);
   if (graceAttempt.ok) {
     return graceAttempt.value;
@@ -1050,6 +1204,13 @@ async function sendJudgeStructuredPrompt<T>(
       state.judgeSessionName,
     );
   }
+  dropPendingTranscriptPrompt(
+    state,
+    "judge",
+    (pendingPrompt) =>
+      pendingPrompt.turn === state.currentTurn &&
+      pendingPrompt.promptKind === "judge finalization retry",
+  );
 
   throw new Error(
     [
@@ -1507,17 +1668,22 @@ async function writeQuestion(
     selection.turnDir,
     `${fileStemForRole(selection.state, selection.askerRole)}-question.md`,
   );
+  const questionJsonPath = path.join(
+    selection.turnDir,
+    `${fileStemForRole(selection.state, selection.askerRole)}-question.json`,
+  );
   const judgeNotePath = path.join(
     selection.turnDir,
     `${fileStemForRole(selection.state, selection.askerRole)}-judge-note.md`,
   );
 
+  await fs.writeFile(judgeNotePath, renderJudgeNoteFile(selection, askResponse.judgeNote), "utf8");
   await fs.writeFile(
     questionPath,
     renderQuestionFile(selection, askResponse.publicQuestion, selection.state.scores),
     "utf8",
   );
-  await fs.writeFile(judgeNotePath, renderJudgeNoteFile(selection, askResponse.judgeNote), "utf8");
+  await writeJsonFile(questionJsonPath, askResponse);
 
   return {
     route:
@@ -1531,6 +1697,7 @@ async function writeQuestion(
     publicQuestion: askResponse.publicQuestion,
     judgeNote: askResponse.judgeNote,
     questionPath,
+    questionJsonPath,
     judgeNotePath,
   };
 }
@@ -1591,8 +1758,13 @@ async function writeAnswer(
     turn.turnDir,
     `${fileStemForRole(turn.state, turn.answererRole)}-answer.md`,
   );
+  const answerJsonPath = path.join(
+    turn.turnDir,
+    `${fileStemForRole(turn.state, turn.answererRole)}-answer.json`,
+  );
 
   await fs.writeFile(answerPath, renderAnswerFile(turn, answerResponse), "utf8");
+  await writeJsonFile(answerJsonPath, answerResponse);
 
   return {
     state: turn.state,
@@ -1607,8 +1779,10 @@ async function writeAnswer(
     flawClaim: answerResponse.flawClaim,
     artifactPaths: answerResponse.artifactPaths,
     questionPath: turn.questionPath,
+    questionJsonPath: turn.questionJsonPath,
     judgeNotePath: turn.judgeNotePath,
     answerPath,
+    answerJsonPath,
   };
 }
 
@@ -1630,6 +1804,10 @@ async function writeAskForfeitTurn(
     selection.turnDir,
     `${fileStemForRole(selection.state, selection.askerRole)}-question.md`,
   );
+  const questionJsonPath = path.join(
+    selection.turnDir,
+    `${fileStemForRole(selection.state, selection.askerRole)}-question.json`,
+  );
   const judgeNotePath = path.join(
     selection.turnDir,
     `${fileStemForRole(selection.state, selection.askerRole)}-judge-note.md`,
@@ -1638,18 +1816,32 @@ async function writeAskForfeitTurn(
     selection.turnDir,
     `${fileStemForRole(selection.state, selection.answererRole)}-answer.md`,
   );
+  const answerJsonPath = path.join(
+    selection.turnDir,
+    `${fileStemForRole(selection.state, selection.answererRole)}-answer.json`,
+  );
 
   await fs.writeFile(
     questionPath,
     renderAskForfeitQuestionFile(selection, selection.state.scores, failure.reason),
     "utf8",
   );
+  await writeJsonFile(questionJsonPath, {
+    issuedByRunner: true,
+    status: "no_valid_submission",
+    reason: failure.reason,
+  });
   await fs.writeFile(
     judgeNotePath,
     renderAskForfeitJudgeNoteFile(selection, failure.reason),
     "utf8",
   );
   await fs.writeFile(answerPath, renderAskForfeitAnswerFile(selection), "utf8");
+  await writeJsonFile(answerJsonPath, {
+    issuedByRunner: true,
+    status: "not_required",
+    reason: "The asker forfeited before submitting a valid question.",
+  });
 
   return await writeSyntheticRuling({
     state: selection.state,
@@ -1661,8 +1853,10 @@ async function writeAskForfeitTurn(
     outcome: "asker_forfeit",
     reason: failure.reason,
     questionPath,
+    questionJsonPath,
     judgeNotePath,
     answerPath,
+    answerJsonPath,
   });
 }
 
@@ -1682,7 +1876,16 @@ async function writeAnswerForfeitTurn(
     turn.turnDir,
     `${fileStemForRole(turn.state, turn.answererRole)}-answer.md`,
   );
+  const answerJsonPath = path.join(
+    turn.turnDir,
+    `${fileStemForRole(turn.state, turn.answererRole)}-answer.json`,
+  );
   await fs.writeFile(answerPath, renderAnswerForfeitFile(turn, failure.reason), "utf8");
+  await writeJsonFile(answerJsonPath, {
+    issuedByRunner: true,
+    status: "no_valid_submission",
+    reason: failure.reason,
+  });
 
   return await writeSyntheticRuling({
     state: turn.state,
@@ -1694,8 +1897,10 @@ async function writeAnswerForfeitTurn(
     outcome: "answerer_forfeit",
     reason: failure.reason,
     questionPath: turn.questionPath,
+    questionJsonPath: turn.questionJsonPath,
     judgeNotePath: turn.judgeNotePath,
     answerPath,
+    answerJsonPath,
   });
 }
 
@@ -1709,34 +1914,21 @@ async function writeSyntheticRuling(options: {
   outcome: AutomaticOutcome;
   reason: string;
   questionPath: string;
+  questionJsonPath: string;
   judgeNotePath: string;
   answerPath: string;
+  answerJsonPath: string;
 }): Promise<WrittenRuling> {
   const { askerDelta, answererDelta } = scoreDeltasForOutcome(options.outcome);
   const rulingPath = path.join(options.turnDir, `${options.state.judgeFileStem}-ruling.md`);
+  const rulingJsonPath = path.join(options.turnDir, `${options.state.judgeFileStem}-ruling.json`);
 
-  await fs.writeFile(
-    rulingPath,
-    renderSyntheticRulingFile(options.state, {
-      turn: options.state.currentTurn,
-      phase: options.state.phase,
-      askerRole: options.askerRole,
-      answererRole: options.answererRole,
-      askerName: options.askerName,
-      answererName: options.answererName,
-      outcome: options.outcome,
-      reason: options.reason,
-      askerDelta,
-      answererDelta,
-      rulingPath,
-      questionPath: options.questionPath,
-      judgeNotePath: options.judgeNotePath,
-      answerPath: options.answerPath,
-    }),
-    "utf8",
-  );
-
-  return {
+  const structuredRuling = {
+    issuedByRunner: true,
+    outcome: options.outcome,
+    reason: options.reason,
+  };
+  const ruling: WrittenRuling = {
     state: options.state,
     turn: options.state.currentTurn,
     phase: options.state.phase,
@@ -1749,10 +1941,35 @@ async function writeSyntheticRuling(options: {
     askerDelta,
     answererDelta,
     rulingPath,
+    rulingJsonPath,
     questionPath: options.questionPath,
+    questionJsonPath: options.questionJsonPath,
     judgeNotePath: options.judgeNotePath,
     answerPath: options.answerPath,
+    answerJsonPath: options.answerJsonPath,
   };
+  await recordRunnerNotice(
+    options.state,
+    ruling.turn,
+    ruling.phase,
+    "automatic ruling",
+    [
+      `Automatic ruling for turn ${ruling.turn}.`,
+      "",
+      `Outcome: ${ruling.outcome}`,
+      `Reason: ${ruling.reason}`,
+      `Score change: ${ruling.askerName} ${formatSignedDelta(ruling.askerDelta)}, ${ruling.answererName} ${formatSignedDelta(ruling.answererDelta)}`,
+      `Score after turn: ${formatScore(updatedScoresAfterRuling(options.state.scores, ruling), options.state.participantAName, options.state.participantBName)}`,
+    ].join("\n"),
+    structuredRuling,
+  );
+  await fs.writeFile(
+    rulingPath,
+    renderSyntheticRulingFile(options.state, ruling),
+    "utf8",
+  );
+  await writeJsonFile(rulingJsonPath, structuredRuling);
+  return ruling;
 }
 
 function judgePrompt(turn: WrittenAnswer): string {
@@ -1801,14 +2018,9 @@ async function writeRuling(turn: WrittenAnswer, rawJudgeResponse: unknown): Prom
   const judgeResponse = normalizeJudgeResponse(rawJudgeResponse);
   const { askerDelta, answererDelta } = scoreDeltasForOutcome(judgeResponse.outcome);
   const rulingPath = path.join(turn.turnDir, `${turn.state.judgeFileStem}-ruling.md`);
+  const rulingJsonPath = path.join(turn.turnDir, `${turn.state.judgeFileStem}-ruling.json`);
 
-  await fs.writeFile(
-    rulingPath,
-    renderRulingFile(turn, judgeResponse, askerDelta, answererDelta),
-    "utf8",
-  );
-
-  return {
+  const ruling: WrittenRuling = {
     state: turn.state,
     turn: turn.state.currentTurn,
     phase: turn.state.phase,
@@ -1821,10 +2033,20 @@ async function writeRuling(turn: WrittenAnswer, rawJudgeResponse: unknown): Prom
     askerDelta,
     answererDelta,
     rulingPath,
+    rulingJsonPath,
     questionPath: turn.questionPath,
+    questionJsonPath: turn.questionJsonPath,
     judgeNotePath: turn.judgeNotePath,
     answerPath: turn.answerPath,
+    answerJsonPath: turn.answerJsonPath,
   };
+  await fs.writeFile(
+    rulingPath,
+    renderRulingFile(turn, judgeResponse, askerDelta, answererDelta),
+    "utf8",
+  );
+  await writeJsonFile(rulingJsonPath, judgeResponse);
+  return ruling;
 }
 
 function rulingNotificationPrompt(ruling: WrittenRuling, recipientRole: MatchRole): string {
@@ -1865,9 +2087,12 @@ function advanceState(state: MatchState, ruling: WrittenRuling): MatchState {
     askerName: ruling.askerName,
     answererName: ruling.answererName,
     questionPath: ruling.questionPath,
+    questionJsonPath: ruling.questionJsonPath,
     judgeNotePath: ruling.judgeNotePath,
     answerPath: ruling.answerPath,
+    answerJsonPath: ruling.answerJsonPath,
     rulingPath: ruling.rulingPath,
+    rulingJsonPath: ruling.rulingJsonPath,
     outcome: ruling.outcome,
     reason: ruling.reason,
     askerDelta: ruling.askerDelta,
@@ -1906,6 +2131,7 @@ function advanceState(state: MatchState, ruling: WrittenRuling): MatchState {
 async function advanceTurn(state: MatchState, ruling: WrittenRuling): Promise<MatchState> {
   const nextState = advanceState(state, ruling);
   await persistManifest(nextState);
+  await persistTranscriptFromLog(nextState);
   return nextState;
 }
 
@@ -1924,6 +2150,289 @@ async function persistManifest(state: MatchState): Promise<void> {
   await fs.writeFile(state.manifestPath, renderManifest(state), "utf8");
 }
 
+async function initializeMessageArchive(state: MatchState): Promise<void> {
+  await fs.writeFile(state.messageLogPath, "", "utf8");
+  await persistTranscriptFromLog(state);
+}
+
+async function appendMessageEvent(
+  state: MatchState,
+  event: MatchMessageEvent,
+  transcriptState?: MatchState,
+): Promise<void> {
+  const existing = await readTextIfExists(state.messageLogPath);
+  const marker = `"eventId":"${event.eventId}"`;
+  if (!existing.includes(marker)) {
+    await fs.appendFile(state.messageLogPath, `${JSON.stringify(event)}\n`, "utf8");
+  }
+  await persistTranscriptFromLog(transcriptState ?? state);
+}
+
+async function persistTranscriptFromLog(state: MatchState): Promise<void> {
+  const events = parseMessageEvents(await readTextIfExists(state.messageLogPath));
+  await fs.writeFile(
+    state.transcriptPath,
+    renderHearingTranscript(
+      {
+        matchId: state.matchId,
+        participantAName: state.participantAName,
+        participantBName: state.participantBName,
+        judgeName: state.judgeName,
+        currentScore: formatScore(state.scores, state.participantAName, state.participantBName),
+        latestCompletedTurn: state.history.at(-1)?.turn ?? 0,
+      },
+      events,
+    ),
+    "utf8",
+  );
+}
+
+function parseMessageEvents(raw: string): MatchMessageEvent[] {
+  return raw
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+    .map((line) => JSON.parse(line) as MatchMessageEvent);
+}
+
+function nextTranscriptEventId(state: MatchState, prefix: string): string {
+  const eventId = `${prefix}-${String(state.nextTranscriptEventId).padStart(6, "0")}`;
+  state.nextTranscriptEventId += 1;
+  return eventId;
+}
+
+function transcriptTrackerForTarget(
+  state: MatchState,
+  target: TranscriptTarget,
+): SessionTranscriptTracker {
+  switch (target) {
+    case "participant_a":
+      return state.participantATranscript;
+    case "participant_b":
+      return state.participantBTranscript;
+    case "judge":
+      return state.judgeTranscript;
+  }
+}
+
+function transcriptSpeakerNameForTarget(state: MatchState, target: TranscriptTarget): string {
+  switch (target) {
+    case "participant_a":
+      return state.participantAName;
+    case "participant_b":
+      return state.participantBName;
+    case "judge":
+      return state.judgeName;
+  }
+}
+
+function transcriptSpeakerRoleForTarget(
+  target: TranscriptTarget,
+): "participant" | "judge" | "runner" {
+  return target === "judge" ? "judge" : "participant";
+}
+
+function sessionNameForTranscriptTarget(state: MatchState, target: TranscriptTarget): string {
+  switch (target) {
+    case "participant_a":
+      return state.participantASessionName;
+    case "participant_b":
+      return state.participantBSessionName;
+    case "judge":
+      return state.judgeSessionName;
+  }
+}
+
+function dropPendingTranscriptPrompt(
+  state: MatchState,
+  target: TranscriptTarget,
+  predicate: (prompt: PendingTranscriptPrompt) => boolean,
+): void {
+  const tracker = transcriptTrackerForTarget(state, target);
+  const index = tracker.pendingPrompts.findIndex(predicate);
+  if (index !== -1) {
+    tracker.pendingPrompts.splice(index, 1);
+  }
+}
+
+async function recordRunnerPrompt(
+  state: MatchState,
+  target: TranscriptTarget,
+  promptKind: string,
+  prompt: string,
+  turn: number,
+  phase: MatchPhase,
+): Promise<void> {
+  const eventId = nextTranscriptEventId(state, "prompt");
+  await appendMessageEvent(
+    state,
+    buildRunnerPromptEvent({
+      eventId,
+      turn,
+      phase,
+      recipientName: transcriptSpeakerNameForTarget(state, target),
+      promptKind,
+      body: prompt,
+    }) as MatchMessageEvent,
+  );
+
+  transcriptTrackerForTarget(state, target).pendingPrompts.push({
+    promptEventId: eventId,
+    turn,
+    phase,
+    promptKind,
+    recipientName: transcriptSpeakerNameForTarget(state, target),
+  });
+}
+
+async function recordRunnerNotice(
+  state: MatchState,
+  turn: number,
+  phase: MatchPhase,
+  title: string,
+  body: string,
+  structuredData?: unknown,
+): Promise<void> {
+  await appendMessageEvent(
+    state,
+    buildRunnerNoticeEvent({
+      eventId: nextTranscriptEventId(state, "notice"),
+      turn,
+      phase,
+      title,
+      body,
+      structuredData,
+    }) as MatchMessageEvent,
+  );
+}
+
+async function syncAllTranscriptSessions(state: MatchState): Promise<void> {
+  await syncTranscriptSession(state, "participant_a");
+  await syncTranscriptSession(state, "participant_b");
+  await syncTranscriptSession(state, "judge");
+}
+
+async function syncTranscriptSession(
+  state: MatchState,
+  target: TranscriptTarget,
+): Promise<void> {
+  const tracker = transcriptTrackerForTarget(state, target);
+  const recordPath = await resolveSessionRecordPathForTarget(state, target, tracker);
+  if (!recordPath) {
+    return;
+  }
+
+  let sessionRecord: unknown;
+  try {
+    sessionRecord = JSON.parse(await fs.readFile(recordPath, "utf8"));
+  } catch {
+    return;
+  }
+
+  const rawMessages = asObject(sessionRecord)?.messages;
+  const messages = Array.isArray(rawMessages) ? rawMessages : [];
+  const startIndex = Math.min(tracker.processedMessageCount, messages.length);
+
+  for (let index = startIndex; index < messages.length; index += 1) {
+    const message = messages[index];
+    const agentMessage = asObject(message)?.Agent;
+    if (!agentMessage) {
+      continue;
+    }
+
+    const pendingPrompt =
+      tracker.pendingPrompts.shift() ?? {
+        promptEventId: nextTranscriptEventId(state, "orphan-prompt"),
+        turn: state.currentTurn,
+        phase: state.phase,
+        promptKind: "session reply",
+        recipientName: transcriptSpeakerNameForTarget(state, target),
+      };
+
+    await appendMessageEvent(
+      state,
+      buildAgentReplyEvent({
+        eventId: nextTranscriptEventId(state, "reply"),
+        turn: pendingPrompt.turn,
+        phase: pendingPrompt.phase,
+        speakerName: transcriptSpeakerNameForTarget(state, target),
+        speakerRole: transcriptSpeakerRoleForTarget(target),
+        promptEventId: pendingPrompt.promptEventId,
+        promptKind: pendingPrompt.promptKind,
+        agentMessage,
+      }) as MatchMessageEvent,
+    );
+  }
+
+  tracker.processedMessageCount = messages.length;
+}
+
+async function resolveSessionRecordPathForTarget(
+  state: MatchState,
+  target: TranscriptTarget,
+  tracker: SessionTranscriptTracker,
+): Promise<string | undefined> {
+  if (tracker.sessionRecordPath && existsSync(tracker.sessionRecordPath)) {
+    return tracker.sessionRecordPath;
+  }
+
+  const sessionsDir = path.join(os.homedir(), ".acpx", "sessions");
+  let entries: string[];
+  try {
+    entries = await fs.readdir(sessionsDir);
+  } catch {
+    return undefined;
+  }
+
+  const sessionName = sessionNameForTranscriptTarget(state, target);
+  let bestPath: string | undefined;
+  let bestLastUsedAt = "";
+
+  for (const entry of entries) {
+    if (!entry.endsWith(".json") || entry.endsWith(".stream.ndjson")) {
+      continue;
+    }
+    const candidatePath = path.join(sessionsDir, entry);
+    let candidate: unknown;
+    try {
+      candidate = JSON.parse(await fs.readFile(candidatePath, "utf8"));
+    } catch {
+      continue;
+    }
+    const record = asObject(candidate);
+    if (!record || record.name !== sessionName) {
+      continue;
+    }
+    const lastUsedAt =
+      typeof record.last_used_at === "string" ? record.last_used_at : "";
+    if (!bestPath || lastUsedAt >= bestLastUsedAt) {
+      bestPath = candidatePath;
+      bestLastUsedAt = lastUsedAt;
+    }
+  }
+
+  if (bestPath) {
+    tracker.sessionRecordPath = bestPath;
+  }
+  return bestPath;
+}
+
+async function readTextIfExists(filePath: string): Promise<string> {
+  try {
+    return await fs.readFile(filePath, "utf8");
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") {
+      return "";
+    }
+    throw error;
+  }
+}
+
+async function writeJsonFile(filePath: string, value: unknown): Promise<void> {
+  await fs.writeFile(filePath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+}
+
 async function writeFinalScoreboard(state: MatchState): Promise<{
   matchDir: string;
   scoreboardPath: string;
@@ -1936,7 +2445,27 @@ async function writeFinalScoreboard(state: MatchState): Promise<{
   const scoreboardPath = path.join(finalDir, "scoreboard.md");
   const result = finalResult(state);
   await fs.writeFile(scoreboardPath, renderScoreboard(state), "utf8");
+  await syncAllTranscriptSessions(state);
+  await recordRunnerNotice(
+    state,
+    state.history.at(-1)?.turn ?? 0,
+    state.phase,
+    "final result",
+    [
+      "Final scoreboard written.",
+      "",
+      `Result: ${result}`,
+      `Final score: ${formatScore(state.scores, state.participantAName, state.participantBName)}`,
+      `Scoreboard: ${scoreboardPath}`,
+    ].join("\n"),
+    {
+      result,
+      scoreboardPath,
+      scores: state.scores,
+    },
+  );
   await persistManifest(state);
+  await persistTranscriptFromLog(state);
   return {
     matchDir: state.matchDir,
     scoreboardPath,
@@ -2135,6 +2664,14 @@ function finalResult(state: MatchState): string {
     : state.participantBName;
 }
 
+function formatSignedDelta(value: number): string {
+  return value > 0 ? `+${value}` : String(value);
+}
+
+function formatPathListInline(paths: string[]): string {
+  return paths.length > 0 ? paths.map((entry) => `\`${entry}\``).join(", ") : "(none)";
+}
+
 function renderManifest(state: MatchState): string {
   const latestCompletedTurn = state.history.at(-1)?.turn ?? 0;
   const nextScheduledTurn =
@@ -2149,6 +2686,8 @@ function renderManifest(state: MatchState): string {
     `- Participant B workspace: \`${state.participantBWorkspaceDir}\``,
     `- Judge workspace: \`${state.judgeWorkspaceDir}\``,
     `- Rules source: \`${state.rulesPath}\``,
+    `- Transcript: \`${state.transcriptPath}\``,
+    `- Message log: \`${state.messageLogPath}\``,
     `- Participant A: \`${state.participantAName}\``,
     `- Participant B: \`${state.participantBName}\``,
     `- Judge: \`${state.judgeName}\``,

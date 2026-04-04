@@ -9,7 +9,7 @@ The flow does the match bookkeeping:
 - creates isolated empty workspaces for both participants and the judge under `~/ai-battle`
 - sends the rules to both participants and the judge
 - runs the ask, wait, answer, judge, and ruling loop
-- writes per-turn files and a final scoreboard
+- writes per-turn files, a standalone transcript, and a final scoreboard
 
 The participants and judge do not run inside the battle repo. They run in empty scratch directories. The flow still writes the official transcript back into this repo.
 
@@ -108,8 +108,27 @@ turn-01/
 The flow also writes:
 
 - `manifest.md`
+- `messages.jsonl`
+- `transcript.md`
 - `rules.md`
 - `final/scoreboard.md`
+
+For each turn, the flow now also writes the structured payload that the agent actually submitted:
+
+```text
+turn-01/
+  codex-question.json
+  codex-question.md
+  codex-judge-note.md
+  claude-answer.json
+  claude-answer.md
+  judge-ruling.json
+  judge-ruling.md
+```
+
+`messages.jsonl` is an append-only machine-readable log of the runner prompts plus the participant and judge ACP replies.
+
+`transcript.md` is regenerated from that log after each recorded message, so interrupted runs still leave a readable partial hearing transcript with prompts, replies, visible thinking, and tool activity that made it into the ACP session.
 
 ## Running
 

@@ -1,0 +1,8 @@
+{
+  "publicQuestion": "How many 9x9 binary matrices (entries only 0 or 1) have row sums (5,4,3,3,3,4,4,2,4) and column sums (5,2,3,5,5,3,3,1,5)? Give just the integer.",
+  "judgeNote": {
+    "intendedAnswer": "907611504913",
+    "validityReason": "The matrix size and every row sum and column sum are fully specified, so the count is a well-defined exact integer. It can be verified independently by dynamic programming over remaining column sums or by equivalent coefficient-extraction methods for 0-1 contingency tables.",
+    "evidencePaths": []
+  }
+}

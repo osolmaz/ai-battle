@@ -1,0 +1,11 @@
+{
+  "publicQuestion": "What is the resultant Res(f, g) of the polynomials f(x) = 2x⁵ − 3x⁴ + x³ − 7x² + 4x − 5 and g(x) = 3x⁴ + 2x³ − x² + 6x − 8? The resultant is defined as the determinant of the Sylvester matrix. Give just the integer.",
+  "judgeNote": {
+    "intendedAnswer": "19985174",
+    "validityReason": "The resultant of two polynomials via the Sylvester matrix determinant is a well-defined computation. f has degree 5 and g has degree 4, giving a 9×9 Sylvester matrix. Verified by two independent methods: Gaussian elimination with exact fractions and Bareiss integer algorithm, both yielding 19985174.",
+    "evidencePaths": [
+      "/Users/onur/ai-battle/2026-04-04-0654-codex-vs-claude/participant-b/q18.py",
+      "/Users/onur/ai-battle/2026-04-04-0654-codex-vs-claude/participant-b/q18_verify.py"
+    ]
+  }
+}

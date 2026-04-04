@@ -7,11 +7,18 @@ Use the repo for the competition record, not for `acpx` internals.
 For each run, keep:
 
 - `manifest.md`
+- `messages.jsonl`
+- `transcript.md`
 - `rules.md`
 - every `turn-*` directory
+  This includes the human-readable `*.md` files and the raw `*.json` submissions for questions, answers, and rulings.
 - `final/scoreboard.md`
 - `ARCHIVE.md` if present
 - `workspaces/` only if the scratch files are useful for reproducibility
+- `acpx-sessions/` for the participant and judge ACP transcripts
+- `native-sessions/` for the original Codex and Claude session files
+
+`messages.jsonl` and `transcript.md` should now be the human-readable hearing record built from the runner prompts plus the ACP session replies, not just the final question, answer, and ruling summaries.
 
 ## Do Not Commit
 
@@ -22,14 +29,54 @@ Do not commit:
 
 Those files are mostly runner state, traces, projections, and artifact snapshots. They are useful for debugging `acpx`, but they add noise, absolute local paths, and a lot of churn.
 
+## Session Files To Back Up
+
+Back up the ACP wrapper session files for each role into the run directory as:
+
+- `sessions/<battle-id>/acpx-sessions/<role>.session.json`
+- `sessions/<battle-id>/acpx-sessions/<role>.stream.ndjson`
+
+This keeps the battle archive readable while preserving:
+
+- full prompts
+- streamed replies
+- tool calls and outputs
+- extra exploration that may not appear in `turn-*`
+
+The repo-level `transcript.md` is generated from these ACP session messages, so these session files are required if you want to rebuild the full hearing transcript later.
+
+These files may contain absolute local paths and adapter-specific logging.
+
+Also back up the original adapter logs separately as:
+
+- `sessions/<battle-id>/native-sessions/codex-participant.rollout.jsonl`
+- `sessions/<battle-id>/native-sessions/claude-participant.jsonl`
+- `sessions/<battle-id>/native-sessions/codex-judge.rollout.jsonl`
+
+Use names that make the role and adapter obvious. Keep these separate from `acpx-sessions/` so it is clear which files come from the ACP wrapper and which come from the underlying model adapter.
+
+For a Codex vs Claude run with Codex as judge, that means backing up all of these if they exist:
+
+- `messages.jsonl`
+- `transcript.md`
+- participant ACP session JSON and stream for Codex
+- participant ACP session JSON and stream for Claude
+- judge ACP session JSON and stream for Codex
+- Codex participant rollout JSONL
+- Claude participant JSONL
+- Codex judge rollout JSONL
+
 ## Repo Backup Workflow
 
 To keep a run in the repo efficiently:
 
 1. Copy the competition record into `sessions/<battle-id>/`.
-2. Copy only the participant scratch files you want to preserve.
-3. Do not copy the `runner/` directory.
-4. Commit the session directory.
+2. Keep `messages.jsonl` and `transcript.md`.
+3. Copy only the participant scratch files you want to preserve.
+4. Copy the ACP session logs into `acpx-sessions/`.
+5. Copy the native adapter session logs into `native-sessions/`.
+6. Do not copy the `runner/` directory.
+7. Commit the session directory.
 
 Example:
 

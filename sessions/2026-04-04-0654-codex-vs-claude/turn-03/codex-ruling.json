@@ -1,0 +1,4 @@
+{
+  "outcome": "answerer_point",
+  "reason": "The public question is valid and the graph has exactly 67 Hamiltonian paths from 1 to 14, so the answer is correct."
+}

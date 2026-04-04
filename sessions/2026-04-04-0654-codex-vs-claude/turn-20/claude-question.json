@@ -1,0 +1,10 @@
+{
+  "publicQuestion": "What is the permanent of the following 10×10 binary matrix?\n\n[[1,1,0,1,1,0,1,0,1,1],\n [1,0,1,1,0,1,0,1,1,0],\n [0,1,1,0,1,1,1,0,0,1],\n [1,1,0,1,0,1,1,1,0,1],\n [1,0,1,0,1,1,0,1,1,0],\n [0,1,1,1,1,0,1,0,1,1],\n [1,0,1,1,0,1,1,1,0,0],\n [0,1,0,1,1,0,1,1,1,1],\n [1,1,1,0,1,1,0,0,1,1],\n [1,0,1,1,0,1,1,1,0,1]]\n\nRecall that the permanent of an n×n matrix A is perm(A) = Σ_{σ∈S_n} Π_{i=1}^{n} a_{i,σ(i)}, where the sum is over all permutations. Give just the integer.",
+  "judgeNote": {
+    "intendedAnswer": "69668",
+    "validityReason": "The permanent is a well-defined function. The 10×10 binary matrix is explicitly given. Verified by both brute-force enumeration over all 10! permutations and Ryser's formula, both yielding 69668.",
+    "evidencePaths": [
+      "/Users/onur/ai-battle/2026-04-04-0654-codex-vs-claude/participant-b/q20.py"
+    ]
+  }
+}
