@@ -1,4 +1,4 @@
-# Hearing Transcript
+# Transcript
 
 - Match ID: `2026-04-04-0654-codex-vs-claude`
 - Participant A: `codex`

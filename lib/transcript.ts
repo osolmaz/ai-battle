@@ -1,60 +1,123 @@
-function formatPhaseLabel(phase) {
+export type TranscriptPhase = "standard" | "sudden_death";
+export type TranscriptEventType = "runner_prompt" | "runner_notice" | "agent_reply";
+export type TranscriptSpeakerRole = "participant" | "judge" | "runner";
+
+type JsonObject = Record<string, unknown>;
+
+type ToolUseInput = {
+  command?: string | unknown[];
+  description?: string;
+};
+
+type ToolResult = {
+  output?: unknown;
+  content?: {
+    Text?: unknown;
+  };
+};
+
+type AgentMessagePart = {
+  Text?: unknown;
+  Thinking?: {
+    text?: unknown;
+  };
+  ToolUse?: {
+    id?: string;
+    name?: string;
+    input?: ToolUseInput;
+    raw_input?: unknown;
+  };
+};
+
+type AgentMessage = {
+  content?: AgentMessagePart[];
+  tool_results?: Record<string, ToolResult | undefined>;
+};
+
+export type TranscriptEvent = {
+  eventId: string;
+  turn: number;
+  phase: TranscriptPhase;
+  eventType: TranscriptEventType;
+  speakerName: string;
+  speakerRole: TranscriptSpeakerRole;
+  recipientName: string;
+  promptType?: string;
+  promptEventId?: string;
+  body: string;
+  structuredData?: unknown;
+};
+
+export type TranscriptMeta = {
+  matchId: string;
+  participantAName: string;
+  participantBName: string;
+  judgeName: string;
+  currentScore: string;
+  latestCompletedTurn: number;
+};
+
+function formatPhaseLabel(phase: TranscriptPhase): string {
   return phase === "sudden_death" ? "sudden death" : "standard match";
 }
 
-function parseJsonObject(text) {
+function parseJsonObject(text: string): JsonObject | undefined {
   const trimmed = String(text ?? "").trim();
   if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) {
     return undefined;
   }
   try {
-    return JSON.parse(trimmed);
+    const parsed = JSON.parse(trimmed);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as JsonObject)
+      : undefined;
   } catch {
     return undefined;
   }
 }
 
-function fenced(code, info = "") {
+function fenced(code: string, info = ""): string {
   return `\`\`\`${info}\n${String(code ?? "").trimEnd()}\n\`\`\``;
 }
 
-function normalizeToolCommand(input) {
+function normalizeToolCommand(input: unknown): string | undefined {
   if (!input || typeof input !== "object") {
     return undefined;
   }
-  if (typeof input.command === "string") {
-    return input.command;
+  const command = (input as ToolUseInput).command;
+  if (typeof command === "string") {
+    return command;
   }
-  if (Array.isArray(input.command)) {
-    return input.command.map((part) => String(part)).join(" ");
+  if (Array.isArray(command)) {
+    return command.map((part) => String(part)).join(" ");
   }
   return undefined;
 }
 
-function normalizeToolDescription(part) {
-  const input = part?.ToolUse?.input;
+function normalizeToolDescription(part: AgentMessagePart): string | undefined {
+  const input = part.ToolUse?.input;
   if (input && typeof input === "object" && typeof input.description === "string") {
     return input.description.trim();
   }
-  const rawInput = part?.ToolUse?.raw_input;
+  const rawInput = part.ToolUse?.raw_input;
   if (typeof rawInput === "string") {
     try {
-      const parsed = JSON.parse(rawInput);
+      const parsed = JSON.parse(rawInput) as ToolUseInput;
       if (parsed && typeof parsed.description === "string") {
         return parsed.description.trim();
       }
     } catch {
-      // ignore
+      // ignore invalid raw_input JSON
     }
   }
-  const name = part?.ToolUse?.name;
+  const name = part.ToolUse?.name;
   if (typeof name === "string" && name.trim().length > 0) {
-    return name.split("\n")[0].trim();
+    return name.split("\n")[0]?.trim();
   }
   return undefined;
 }
 
-function normalizeToolResultText(result) {
+function normalizeToolResultText(result: ToolResult | undefined): string | undefined {
   if (!result || typeof result !== "object") {
     return undefined;
   }
@@ -72,13 +135,17 @@ function normalizeToolResultText(result) {
   return undefined;
 }
 
-function buildAgentReplyBody(agentMessage) {
-  const lines = [];
+function buildAgentReplyBody(agentMessage: AgentMessage): {
+  body: string;
+  structuredData?: JsonObject;
+} {
+  const lines: string[] = [];
   const content = Array.isArray(agentMessage?.content) ? agentMessage.content : [];
-  const toolResults = agentMessage?.tool_results && typeof agentMessage.tool_results === "object"
-    ? agentMessage.tool_results
-    : {};
-  let structuredData;
+  const toolResults =
+    agentMessage?.tool_results && typeof agentMessage.tool_results === "object"
+      ? agentMessage.tool_results
+      : {};
+  let structuredData: JsonObject | undefined;
 
   for (const part of content) {
     if (part?.Text !== undefined) {
@@ -97,7 +164,7 @@ function buildAgentReplyBody(agentMessage) {
     }
 
     if (part?.Thinking) {
-      const thinkingText = String(part.Thinking?.text ?? "").trim();
+      const thinkingText = String(part.Thinking.text ?? "").trim();
       if (thinkingText) {
         lines.push("Thinking:", "", fenced(thinkingText, "text"), "");
       }
@@ -112,7 +179,8 @@ function buildAgentReplyBody(agentMessage) {
       if (command) {
         lines.push(fenced(command, "sh"), "");
       }
-      const resultText = normalizeToolResultText(toolResults[tool.id]);
+      const resultText =
+        typeof tool.id === "string" ? normalizeToolResultText(toolResults[tool.id]) : undefined;
       if (resultText) {
         lines.push("Tool result:", "", fenced(resultText, "text"), "");
       }
@@ -137,7 +205,14 @@ export function buildRunnerPromptEvent({
   recipientName,
   promptType,
   body,
-}) {
+}: {
+  eventId: string;
+  turn: number;
+  phase: TranscriptPhase;
+  recipientName: string;
+  promptType?: string;
+  body: string;
+}): TranscriptEvent {
   return {
     eventId,
     turn,
@@ -158,7 +233,14 @@ export function buildRunnerNoticeEvent({
   body,
   title,
   structuredData,
-}) {
+}: {
+  eventId: string;
+  turn: number;
+  phase: TranscriptPhase;
+  body: string;
+  title: string;
+  structuredData?: unknown;
+}): TranscriptEvent {
   return {
     eventId,
     turn,
@@ -182,7 +264,16 @@ export function buildAgentReplyEvent({
   promptEventId,
   promptType,
   agentMessage,
-}) {
+}: {
+  eventId: string;
+  turn: number;
+  phase: TranscriptPhase;
+  speakerName: string;
+  speakerRole: Exclude<TranscriptSpeakerRole, "runner">;
+  promptEventId?: string;
+  promptType?: string;
+  agentMessage: AgentMessage;
+}): TranscriptEvent {
   const rendered = buildAgentReplyBody(agentMessage);
   return {
     eventId,
@@ -199,7 +290,7 @@ export function buildAgentReplyEvent({
   };
 }
 
-function renderEventHeading(event) {
+function renderEventHeading(event: TranscriptEvent): string {
   if (event.eventType === "runner_prompt") {
     return `match runner to ${event.recipientName}`;
   }
@@ -209,13 +300,13 @@ function renderEventHeading(event) {
   return "match runner";
 }
 
-function renderPromptTypeLine(event) {
+function renderPromptTypeLine(event: TranscriptEvent): string | null {
   return event.promptType ? `Type: ${event.promptType}` : null;
 }
 
-export function renderTranscript(meta, events) {
+export function renderTranscript(meta: TranscriptMeta, events: TranscriptEvent[]): string {
   const lines = [
-    "# Hearing Transcript",
+    "# Transcript",
     "",
     `- Match ID: \`${meta.matchId}\``,
     `- Participant A: \`${meta.participantAName}\``,
@@ -233,7 +324,7 @@ export function renderTranscript(meta, events) {
     return `${lines.join("\n").trimEnd()}\n`;
   }
 
-  const repliesByPrompt = new Map();
+  const repliesByPrompt = new Map<string, TranscriptEvent[]>();
   for (const event of events) {
     if (event.eventType === "agent_reply" && event.promptEventId) {
       const existing = repliesByPrompt.get(event.promptEventId) ?? [];
@@ -242,14 +333,12 @@ export function renderTranscript(meta, events) {
     }
   }
 
-  let currentSection = null;
-  const renderedReplies = new Set();
+  let currentSection: string | null = null;
+  const renderedReplies = new Set<string>();
 
-  const ensureSection = (event) => {
+  const ensureSection = (event: TranscriptEvent) => {
     const section =
-      event.turn === 0
-        ? "setup"
-        : `turn-${event.turn}-${event.phase ?? "standard"}`;
+      event.turn === 0 ? "setup" : `turn-${event.turn}-${event.phase ?? "standard"}`;
     if (section === currentSection) {
       return;
     }
@@ -264,7 +353,7 @@ export function renderTranscript(meta, events) {
     currentSection = section;
   };
 
-  const renderSingleEvent = (event) => {
+  const renderSingleEvent = (event: TranscriptEvent) => {
     ensureSection(event);
     lines.push(`### ${renderEventHeading(event)}`, "");
     const promptTypeLine = renderPromptTypeLine(event);

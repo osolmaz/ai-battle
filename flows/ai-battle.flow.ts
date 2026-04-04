@@ -8,8 +8,8 @@ import {
   buildAgentReplyEvent,
   buildRunnerNoticeEvent,
   buildRunnerPromptEvent,
-  renderTranscript as renderHearingTranscript,
-} from "../lib/hearing-transcript.js";
+  renderTranscript,
+} from "../lib/transcript.ts";
 
 type AiBattleInput = {
   battleRepo?: string;
@@ -2184,7 +2184,7 @@ async function persistTranscriptFromLog(state: MatchState): Promise<void> {
   const events = parseMessageEvents(await readTextIfExists(state.messageLogPath));
   await fs.writeFile(
     state.transcriptPath,
-    renderHearingTranscript(
+    renderTranscript(
       {
         matchId: state.matchId,
         participantAName: state.participantAName,

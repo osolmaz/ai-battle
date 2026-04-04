@@ -18,7 +18,7 @@ For each run, keep:
 - `acpx-sessions/` for the participant and judge ACP transcripts
 - `native-sessions/` for the original Codex and Claude session files
 
-`messages.jsonl` and `transcript.md` should now be the human-readable hearing record built from the runner prompts plus the ACP session replies, not just the final question, answer, and ruling summaries.
+`messages.jsonl` and `transcript.md` should now be the human-readable transcript record built from the runner prompts plus the ACP session replies, not just the final question, answer, and ruling summaries.
 
 ## Do Not Commit
 
@@ -43,7 +43,7 @@ This keeps the battle archive readable while preserving:
 - tool calls and outputs
 - extra exploration that may not appear in `turn-*`
 
-The repo-level `transcript.md` is generated from these ACP session messages, so these session files are required if you want to rebuild the full hearing transcript later.
+The repo-level `transcript.md` is generated from these ACP session messages, so these session files are required if you want to rebuild the full transcript later.
 
 These files may contain absolute local paths and adapter-specific logging.
 
