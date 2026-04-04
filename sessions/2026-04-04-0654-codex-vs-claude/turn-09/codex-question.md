@@ -1,0 +1,11 @@
+# codex Question
+
+- Phase: `standard match`
+- Turn: `9`
+- Asker: `codex`
+- Answerer: `claude`
+- Score before turn: `codex 4, claude 4`
+
+## Question
+
+How many distinct simple directed cycles of length at least 3 does the directed graph on vertices {1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19} with directed edges (1,10), (11,1), (13,1), (16,1), (2,7), (2,10), (12,2), (3,6), (11,3), (16,3), (4,7), (4,12), (4,15), (4,18), (4,19), (8,5), (5,12), (5,16), (5,17), (6,7), (10,6), (13,6), (9,7), (11,7), (7,13), (7,14), (17,7), (19,7), (8,10), (14,8), (17,8), (10,9), (9,11), (12,9), (13,9), (9,16), (9,19), (10,15), (16,10), (10,19), (11,14), (11,15), (11,16), (12,14), (15,12), (12,16), (16,13), (17,13), (15,16), (16,17), (16,19), (17,18), (19,17), (19,18) have? A simple directed cycle is a sequence v1->v2->...->vk->v1 with k>=3 and v1,...,vk all distinct. Two cycles are considered the same if one is a cyclic rotation of the other. Give just the integer.
