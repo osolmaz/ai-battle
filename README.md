@@ -19,9 +19,16 @@ Each participant gets up to `30` minutes for each ask turn and each answer turn.
 
 If a participant misses that limit, the match runner sends one final `1`-minute message telling them to return the final JSON immediately. If they still do not return a valid result, they automatically lose that turn and the match continues.
 
-## Codex vs Claude
+## Current Scores
+
+### Codex vs Claude
 
 These are the full recorded Codex vs Claude runs so far.
+
+Recorded setup for these runs:
+
+- `codex` participant and `codex` judge ran through `codex-acp` and used model `gpt-5.4` with reasoning effort `xhigh`
+- `claude` participant ran through `claude-agent-acp` and used model `claude-opus-4-6` with high thinking
 
 | Run | Opener | Codex Score | Claude Score | Winner |
 |---|---|---:|---:|---|
