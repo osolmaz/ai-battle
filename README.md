@@ -37,6 +37,14 @@ Recorded setup for these runs:
 | [2026-04-04-1950-claude-vs-codex](/Users/onur/offline/ai-battle/sessions/2026-04-04-1950-claude-vs-codex/final/scoreboard.md) | `claude` | 13 | 13 | `tie` |
 | [2026-04-04-2146-claude-vs-codex](/Users/onur/offline/ai-battle/sessions/2026-04-04-2146-claude-vs-codex/final/scoreboard.md) | `claude` | 10 | 9 | `codex` |
 
+## Potential For Use In Self-Play
+
+This is a game in which strong models interrogate each other under a judge (Interrogation Game?). Each side has to do two things well at the same time: ask questions that expose a weakness in the other side, and answer difficult questions without making mistakes. That makes it interesting to me as more than just a benchmark.
+
+I suspect that a variant of this setup, not necessarily this exact one, could be useful for self-play or RL-style training because it pushes a model to both generate tests and pass them. I am not sure yet whether that idea is actually good, and I would love to hear feedback on it. My intuition tells me that the requirement of a judge is tricky for a self-play setup.
+
+If you are an ML researcher and have thoughts, I would be interested to hear them at onur@solmaz.io.
+
 ## Core Premise
 
 - Everything for a match stays inside one repository.
