@@ -1,0 +1,4 @@
+{
+  "outcome": "answerer_point",
+  "reason": "Valid self-contained well-founded-semantics question; iterating Γ_P^2 yields lfp = {a,d} and gfp = {a,b,c,d,e}, so True = {a,d}, False = {f}, and Undefined = {b,c,e}."
+}

@@ -1,0 +1,5 @@
+{
+  "answer": "The reduced Gröbner basis for lex order `x > y` is `{x^2 + 1, y}`.",
+  "flawClaim": null,
+  "artifactPaths": []
+}

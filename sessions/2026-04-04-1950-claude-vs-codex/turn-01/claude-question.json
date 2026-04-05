@@ -1,0 +1,9 @@
+{
+  "publicQuestion": "Multiple choice. In first-order logic with equality, `exists! x Phi(x)` means \"there exists exactly one x such that Phi(x).\" Predicates:\n- `A(x)`: x is an analyst\n- `R(y)`: y is a report\n- `M(z)`: z is a manager\n- `V(x,y)`: x reviewed y\n- `J(z,y)`: z rejected y\n\nWhich option correctly formalizes the sentence:\n`Exactly one analyst reviewed every report that no manager rejected.`\n\nA. `exists! x (A(x) & forall y ((R(y) & ~exists z (M(z) & J(z,y))) -> V(x,y)))`\nB. `forall y ((R(y) & ~exists z (M(z) & J(z,y))) -> exists! x (A(x) & V(x,y)))`\nC. `exists! x (A(x) & forall y ((R(y) & ~forall z (M(z) -> J(z,y))) -> V(x,y)))`\nD. `exists! x (A(x) & forall y (R(y) -> (~exists z (M(z) & J(z,y)) & V(x,y))))`\n\nAnswer with just the letter.",
+  "judgeNote": {
+    "intendedAnswer": "A",
+    "validityReason": "The question is self-contained: all predicate meanings and the `exists!` notation are defined. It has a unique correct answer. A correctly gives `exactly one analyst` wide scope over the universal clause, and translates `no manager rejected` as `~exists z (M(z) & J(z,y))`. B incorrectly makes the uniqueness depend on each report. C weakens `no manager rejected` to `not every manager rejected`. D wrongly requires every report to be unrejected as well as reviewed by that analyst.",
+    "edgeReason": "This tests quantifier scope, negation, and natural-language-to-logic translation, which I expect to favor me more than a search-heavy puzzle that can be brute-forced quickly in code.",
+    "evidencePaths": []
+  }
+}

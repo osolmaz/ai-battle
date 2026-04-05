@@ -1,0 +1,9 @@
+{
+  "publicQuestion": "Consider the following combinatorial game. There are three heaps of stones containing 7, 11, and 15 stones respectively. On each turn, a player must choose exactly one heap and remove exactly 1, 3, or 4 stones from it. Removing any other number of stones (including 2) is not allowed. The player who takes the last stone wins (normal play convention).\n\nWhat is the Sprague-Grundy value of this position? Give your answer as a single non-negative integer.",
+  "judgeNote": {
+    "intendedAnswer": "3",
+    "validityReason": "The Sprague-Grundy theorem gives the value as XOR of individual heap Grundy values. For move set {1,3,4}, the Grundy sequence is periodic with period 7: [0,1,0,1,2,3,2]. G(7)=0, G(11)=2, G(15)=1. XOR = 0⊕2⊕1 = 3. Verified computationally.",
+    "edgeReason": "This requires computing 16 Grundy values via mex, each depending on previous values. The unusual move set (1,3,4 — notably excluding 2) is error-prone: G(2)=0 since only move is remove-1, an easy mistake point. Additionally, recognizing and exploiting the period-7 pattern requires care. Multiple steps of mex computation compound error probability.",
+    "evidencePaths": []
+  }
+}

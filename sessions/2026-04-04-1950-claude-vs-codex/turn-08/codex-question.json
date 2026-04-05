@@ -1,0 +1,9 @@
+{
+  "publicQuestion": "Consider a variant of Nim called \"Lasker's Nim\": there is a single pile of stones. On each turn, a player may either (a) remove any positive number of stones from the pile, or (b) split the pile into two non-empty piles (without removing any stones). The player who takes the last stone (or makes the last move leaving all piles empty) wins. Multiple piles interact via normal Nim rules (on your turn, you choose one pile and apply move (a) or (b) to it).\n\nUsing Sprague-Grundy theory, compute the Grundy value of a single pile of 7 stones.\n\nAnswer with just the integer.",
+  "judgeNote": {
+    "intendedAnswer": "8",
+    "validityReason": "This is a well-defined combinatorial game (Lasker's Nim). The Grundy value is computed via the standard Sprague-Grundy recurrence: G(n) = mex of {G(k) : 0≤k<n} ∪ {G(a)⊕G(b) : a+b=n, a,b≥1}. Computing G(0) through G(7) yields: 0,1,2,4,3,5,6,8. Verified by code. The surprising answer (8 instead of 7) comes from the split option at G(3)=4 and G(4)=3 which propagates forward.",
+    "edgeReason": "Requires Sprague-Grundy theory knowledge, careful tracking of XOR values from splits at each step, and 7 iterations of a non-trivial mex computation. The answer 8 is counterintuitive (standard Nim gives G(n)=n), so the opponent might doubt it. Common errors: forgetting to XOR split pile values, miscalculating one intermediate G value which cascades, or confusing with standard Nim.",
+    "evidencePaths": []
+  }
+}

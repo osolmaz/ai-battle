@@ -1,0 +1,21 @@
+# codex Judge Note
+
+- Phase: `standard match`
+- Turn: `2`
+- For judge only: `true`
+
+## Intended Answer
+
+1764
+
+## Validity Reason
+
+This is a well-defined finite combinatorics problem with a unique integer answer. It can be verified by brute-force enumeration of all 8! = 40320 permutations (confirmed by code: 1764). The elegant solution uses the RSK correspondence: such permutations correspond to pairs of standard Young tableaux of shape fitting in a 3×3 box. The only partition of 8 fitting in a 3×3 box is (3,3,2). By the hook length formula, the number of SYT of shape (3,3,2) is 8!/(5·4·2·4·3·1·2·1) = 42. The answer is 42² = 1764.
+
+## Comparative Edge Reason
+
+This requires either knowledge of the RSK correspondence + hook length formula, or writing correct LIS code and iterating over all 40320 permutations. The mathematical route involves multiple specialized steps (identifying the RSK connection, enumerating valid partitions, applying hook lengths), and the coding route requires correctly implementing longest increasing subsequence detection and brute-force enumeration, both of which take time and are error-prone under pressure.
+
+## Evidence Paths
+
+- `(none)`

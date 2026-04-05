@@ -1,0 +1,4 @@
+{
+  "outcome": "answerer_point",
+  "reason": "Valid question; by Legendre's formula the smallest n with v2(n!) at least 100 is 104, matching the answer."
+}

@@ -1,0 +1,4 @@
+{
+  "outcome": "answerer_point",
+  "reason": "Valid and self-contained shift/reset evaluation question; 127 is the correct result under the specified left-to-right call-by-value semantics."
+}

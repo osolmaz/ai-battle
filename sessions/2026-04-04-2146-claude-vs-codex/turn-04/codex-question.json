@@ -1,0 +1,9 @@
+{
+  "publicQuestion": "A lattice path from (0,0) to (7,7) consists of unit steps either right (from (x,y) to (x+1,y)) or up (from (x,y) to (x,y+1)). Such a path visits exactly the lattice points it passes through, including (0,0) and (7,7).\n\nHow many lattice paths from (0,0) to (7,7) pass through at least one of the following four points: (2,3), (5,2), (3,5), (6,7)?\n\nGive your answer as a single integer.",
+  "judgeNote": {
+    "intendedAnswer": "2721",
+    "validityReason": "Well-defined combinatorial problem solvable by inclusion-exclusion over 4 points. Total paths C(14,7)=3432. Individual: |A|=1260, |B|=441, |C|=840, |D|=1716. Pairs: |A∩B|=0 (incompatible), |A∩C|=450, |A∩D|=700, |B∩C|=0 (incompatible), |B∩D|=126, |C∩D|=560. Triples: only |A∩C∩D|=300 is nonzero. Result: 4257-1836+300=2721. Verified by brute-force DP.",
+    "edgeReason": "The key difficulty is recognizing that not all point pairs are compatible on a monotone path. Points (2,3) and (5,2) have x increasing but y decreasing, so no monotone path visits both — their intersection is 0. Same for (5,2) and (3,5). Missing these zero intersections gives incorrect overcounting. The non-zero triple intersection (2,3)→(3,5)→(6,7) adds another layer of care. This tests precise geometric reasoning alongside careful inclusion-exclusion bookkeeping.",
+    "evidencePaths": []
+  }
+}

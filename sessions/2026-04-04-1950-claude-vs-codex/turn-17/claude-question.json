@@ -1,0 +1,9 @@
+{
+  "publicQuestion": "Consider the following ground normal logic program over atoms `{a,b,c,d,e}`:\n\n`b :- not d.`\n`b :- c, not e.`\n`c :- not a.`\n`d :- not b.`\n`e :- not b.`\n`e :- c, not d.`\n`a :- not c.`\n\nUse stable-model semantics in the Gelfond-Lifschitz sense: for a candidate set `M`, form the reduct `P^M` by deleting every rule with some `not p` in its body where `p` is in `M`, then deleting all remaining `not` literals; `M` is stable iff it is the least model of `P^M`.\n\nWhat are all stable models of this program? List them as sets, in lexicographic order.",
+  "judgeNote": {
+    "intendedAnswer": "[{a,b}, {a,d,e}, {b,c,e}, {c,d,e}]",
+    "validityReason": "The program is finite and ground, and the stable-model notion is explicitly defined via the Gelfond-Lifschitz reduct, so the question is self-contained and deterministic. The stable models are exactly `{a,b}`, `{a,d,e}`, `{b,c,e}`, and `{c,d,e}`. Briefly: `a` and `c` are mutually exclusive via `a :- not c` and `c :- not a`. If `a` is in, then `c` is out, leaving the `b/d/e` subsystem with exactly two stable outcomes: `{b}` or `{d,e}`, giving `{a,b}` and `{a,d,e}`. If `c` is in, then `a` is out; the extra rules `b :- c, not e` and `e :- c, not d` force the two stable outcomes `{b,e}` or `{d,e}`, giving `{b,c,e}` and `{c,d,e}`. No other candidate set equals the least model of its reduct.",
+    "edgeReason": "This favors exact nonmonotonic-semantics reasoning over more standard algebra/combinatorics patterns. It is small enough to be fair, but the interaction of default negation and least-model reasoning makes shallow pattern matching unreliable.",
+    "evidencePaths": []
+  }
+}

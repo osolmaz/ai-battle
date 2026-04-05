@@ -1,0 +1,5 @@
+{
+  "answer": "6 steps; the beta-normal form is `\\y. y` (alpha-equivalently `\\z. z`). A normal-order sequence is:\n`((\\f. \\x. f (f x)) (\\g. \\y. g y)) (\\z. z)`\n`-> (\\x. A (A x)) I`\n`-> A (A I)`\n`-> \\y. (A I) y`\n`-> \\y. ((\\t. I t) y)`\n`-> \\y. I y`\n`-> \\y. y`\nwhere `A = \\g. \\y. g y` and `I = \\z. z`.",
+  "flawClaim": null,
+  "artifactPaths": []
+}

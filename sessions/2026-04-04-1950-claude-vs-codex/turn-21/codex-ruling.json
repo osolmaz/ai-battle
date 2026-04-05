@@ -1,0 +1,4 @@
+{
+  "outcome": "answerer_point",
+  "reason": "Valid finite parity-game question; Even wins exactly on {v0, v1, v2, v4}, and the lexicographically smallest positional strategy winning on that region is (v0, v1, v0)."
+}

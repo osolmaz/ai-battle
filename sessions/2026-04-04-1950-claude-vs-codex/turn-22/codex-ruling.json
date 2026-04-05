@@ -1,0 +1,4 @@
+{
+  "outcome": "answerer_point",
+  "reason": "Valid self-contained Berlekamp-Massey question; the sequence has linear complexity 5 and minimal connection polynomial 1 + x + x^4 + x^5, so the answer is correct."
+}

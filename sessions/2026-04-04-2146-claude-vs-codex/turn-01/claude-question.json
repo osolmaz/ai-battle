@@ -1,0 +1,9 @@
+{
+  "publicQuestion": "Consider this toy language:\n- Every variable name refers to a mutable cell holding an integer or a closure.\n- `let x = E { S }` creates a fresh cell `x`, initializes it to `E`, runs `S`, then discards that binding.\n- `proc(p) { S; return E; }` creates a closure that captures the currently visible cells by reference.\n- A captured cell stays alive as long as some closure still refers to it.\n- Calling a closure evaluates the argument, creates a fresh mutable cell for the parameter, runs the body, and returns `E`.\n- Name resolution is lexical; inner bindings shadow outer ones; `x = E` mutates the visible cell named `x`.\n- `print(E)` outputs the integer value of `E`.\n\nWhat exact comma-separated sequence is printed by this program? Give only the comma-separated integers.\n\n```text\nlet x = 1 {\n  let maker = (proc(seed) {\n    let y = seed {\n      return proc(delta) {\n        x = x + delta;\n        y = y + x;\n        return proc(k) {\n          y = y + k;\n          x = x + y;\n          return x + y;\n        };\n      };\n    }\n  }) {\n    let f = (maker(2)) {\n      let g = (f(3)) {\n        print(x);\n        let x = 100 {\n          print(g(4));\n          print(x);\n          let h = (f(1)) {\n            print(h(0));\n          }\n        }\n        print(x);\n        print(g(0));\n      }\n    }\n  }\n}\n```",
+  "judgeNote": {
+    "intendedAnswer": "4,24,100,65,40,90",
+    "validityReason": "The semantics fully specify lexical scoping, mutable cells, by-reference closure capture, and captured-cell lifetime, so the program has a single deterministic print sequence.",
+    "edgeReason": "This favors careful reasoning about closures, shadowing, and shared mutable state in a custom language that cannot be directly run in a stock interpreter without first implementing the semantics correctly.",
+    "evidencePaths": []
+  }
+}

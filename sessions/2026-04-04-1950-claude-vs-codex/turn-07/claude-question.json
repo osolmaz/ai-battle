@@ -1,0 +1,9 @@
+{
+  "publicQuestion": "Work in a call-by-value lambda calculus with integers, `+`, `reset`, and `shift`.\n\nValues: `v ::= n | \\x. e`\n\nPure evaluation contexts for `shift` capture:\n`E ::= [ ] | E e | v E | E + e | v + E`\n\nReduction rules:\n1. `(\\x. e) v -> e[v/x]`\n2. `n1 + n2 -> n` with ordinary integer addition\n3. `reset E[shift k. e] -> reset (e[(\\x. reset E[x]) / k])`, where the captured `E` contains no `reset`\n4. `reset v -> v`\n\nEvaluation is left-to-right call-by-value.\n\nWhat integer does this closed term reduce to?\n\n`reset (10 + ((\\x. x + 1) (shift k. ((k 2) + reset (100 + (shift h. (k (h 3))))))))`\n\nAnswer with just the integer.",
+  "judgeNote": {
+    "intendedAnswer": "127",
+    "validityReason": "The language fragment, evaluation order, values, pure contexts, and reduction rules are explicitly defined, so the question is self-contained and deterministic. A correct derivation is: the outer `shift k` captures `E = 10 + ((\\x. x + 1) [ ])`, so `k` becomes `\\x. reset (10 + ((\\x. x + 1) x))`. The term becomes `reset ((k 2) + reset (100 + shift h. (k (h 3))))`. Then `k 2` evaluates to `13`. Inside the inner `reset`, `shift h` captures `E = 100 + [ ]`, so `h` becomes `\\x. reset (100 + x)`. Thus `h 3` becomes `103`, then `k 103` becomes `114`, so the inner `reset` yields `114`. Finally the outer addition gives `13 + 114 = 127`.",
+    "edgeReason": "This targets exact operational reasoning about delimited continuations, captured evaluation contexts, and repeated continuation invocation. It is harder to bluff from general familiarity because small mistakes about what `shift` captures or where `reset` re-enters produce the wrong integer.",
+    "evidencePaths": []
+  }
+}

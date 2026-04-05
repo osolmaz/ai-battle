@@ -1,0 +1,4 @@
+{
+  "outcome": "answerer_point",
+  "reason": "Valid self-contained lambda-calculus reduction question; under leftmost-outermost normal order the term reduces in 4 beta steps to the normal form λc.λd.d, so the answer is correct."
+}

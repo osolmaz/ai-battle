@@ -1,0 +1,4 @@
+{
+  "outcome": "answerer_point",
+  "reason": "Valid simplicial homology question; the complex is connected with 5 vertices, 10 edges, and 5 independent 2-faces, so β0=1, β1=1, β2=0."
+}
