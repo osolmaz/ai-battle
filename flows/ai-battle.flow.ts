@@ -1294,8 +1294,7 @@ async function ensureAgentSession(
       "quiet",
       "--cwd",
       workspaceDir,
-      "--agent",
-      profile,
+      ...buildAcpxAgentArgs(profile),
       "sessions",
       "ensure",
       "--name",
@@ -1320,8 +1319,7 @@ async function cancelAgentPrompt(
       "quiet",
       "--cwd",
       workspaceDir,
-      "--agent",
-      profile,
+      ...buildAcpxAgentArgs(profile),
       "cancel",
       "-s",
       sessionName,
@@ -1354,8 +1352,7 @@ async function runAgentPromptCommand(options: {
       ...(options.timeoutMs ? ["--timeout", String(Math.ceil(options.timeoutMs / 1000))] : []),
       "--cwd",
       options.workspaceDir,
-      "--agent",
-      options.profile,
+      ...buildAcpxAgentArgs(options.profile),
       "prompt",
       ...(options.noWait ? ["--no-wait"] : []),
       "-s",
@@ -1367,6 +1364,14 @@ async function runAgentPromptCommand(options: {
     stdin: options.prompt,
     timeoutMs: options.timeoutMs ? options.timeoutMs + 15_000 : 15_000,
   });
+}
+
+function buildAcpxAgentArgs(profile: string): string[] {
+  const trimmed = profile.trim();
+  if (/^[A-Za-z0-9][A-Za-z0-9_-]*$/u.test(trimmed)) {
+    return [trimmed];
+  }
+  return ["--agent", trimmed];
 }
 
 type CliCommandResult = {
