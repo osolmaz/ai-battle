@@ -15,12 +15,20 @@ type AiBattleInput = {
   battleRepo?: string;
   rulesPath?: string;
   scratchRoot?: string;
+  participantA?: RoleInput;
+  participantB?: RoleInput;
+  judge?: RoleInput;
   participantAName?: string;
   participantBName?: string;
   judgeName?: string;
   questionCount?: number;
   suddenDeathQuestionCount?: number;
   startingParticipant?: MatchRole;
+};
+
+type RoleInput = {
+  profile?: string;
+  label?: string;
 };
 
 type MatchRole = "participant_a" | "participant_b";
@@ -124,6 +132,17 @@ type SessionTranscriptTracker = {
   sessionRecordPath?: string;
 };
 
+type ResolvedRoleDefinition = {
+  profile: string;
+  label: string;
+};
+
+type ResolvedRoleConfig = {
+  participantA: ResolvedRoleDefinition;
+  participantB: ResolvedRoleDefinition;
+  judge: ResolvedRoleDefinition;
+};
+
 type MatchState = {
   battleRepo: string;
   rulesPath: string;
@@ -138,12 +157,12 @@ type MatchState = {
   manifestPath: string;
   transcriptPath: string;
   messageLogPath: string;
+  participantAProfile: string;
+  participantBProfile: string;
+  judgeProfile: string;
   participantAName: string;
   participantBName: string;
   judgeName: string;
-  participantAAgentCommand: string;
-  participantBAgentCommand: string;
-  judgeAgentCommand: string;
   participantASessionName: string;
   participantBSessionName: string;
   judgeSessionName: string;
@@ -693,13 +712,55 @@ function createSessionTranscriptTracker(): SessionTranscriptTracker {
   };
 }
 
+function resolveRoleConfig(input: AiBattleInput): ResolvedRoleConfig {
+  return {
+    participantA: resolveRoleDefinition(
+      input.participantA,
+      input.participantAName,
+      "codex",
+      "Codex",
+    ),
+    participantB: resolveRoleDefinition(
+      input.participantB,
+      input.participantBName,
+      "claude",
+      "Claude",
+    ),
+    judge: resolveRoleDefinition(input.judge, input.judgeName, "codex", "Codex"),
+  };
+}
+
+function resolveRoleDefinition(
+  role: RoleInput | undefined,
+  legacyLabel: string | undefined,
+  defaultProfile: string,
+  defaultLabel: string,
+): ResolvedRoleDefinition {
+  const profile = normalizeRoleProfile(role?.profile, defaultProfile);
+  const label = normalizeRoleLabel(role?.label ?? legacyLabel, defaultLabel);
+  return {
+    profile,
+    label,
+  };
+}
+
+function normalizeRoleProfile(value: string | undefined, defaultProfile: string): string {
+  const trimmed = value?.trim();
+  return trimmed && trimmed.length > 0 ? trimmed : defaultProfile;
+}
+
+function normalizeRoleLabel(value: string | undefined, fallback: string): string {
+  const trimmed = value?.trim();
+  return trimmed && trimmed.length > 0 ? trimmed : fallback;
+}
+
 async function prepareMatch(input: AiBattleInput): Promise<PreparedMatch> {
   const battleRepo = path.resolve(input.battleRepo ?? process.cwd());
   const scratchRoot = resolveScratchRoot(input.scratchRoot);
-  const agentCommands = await loadAgentCommands(battleRepo);
-  const participantAName = input.participantAName?.trim() || "participant-a";
-  const participantBName = input.participantBName?.trim() || "participant-b";
-  const judgeName = input.judgeName?.trim() || "judge";
+  const roleConfig = resolveRoleConfig(input);
+  const participantAName = roleConfig.participantA.label;
+  const participantBName = roleConfig.participantB.label;
+  const judgeName = roleConfig.judge.label;
   const participantAFileStem = sanitizeNameForPath(participantAName);
   const participantBFileStem = sanitizeNameForPath(participantBName);
   const judgeFileStem = sanitizeNameForPath(judgeName);
@@ -752,12 +813,12 @@ async function prepareMatch(input: AiBattleInput): Promise<PreparedMatch> {
     manifestPath,
     transcriptPath,
     messageLogPath,
+    participantAProfile: roleConfig.participantA.profile,
+    participantBProfile: roleConfig.participantB.profile,
+    judgeProfile: roleConfig.judge.profile,
     participantAName,
     participantBName,
     judgeName,
-    participantAAgentCommand: agentCommands.participantAAgentCommand,
-    participantBAgentCommand: agentCommands.participantBAgentCommand,
-    judgeAgentCommand: agentCommands.judgeAgentCommand,
     participantASessionName,
     participantBSessionName,
     judgeSessionName,
@@ -883,42 +944,6 @@ function chooseTurn(state: MatchState): TurnSelection {
   };
 }
 
-async function loadAgentCommands(battleRepo: string): Promise<{
-  participantAAgentCommand: string;
-  participantBAgentCommand: string;
-  judgeAgentCommand: string;
-}> {
-  const configPath = path.join(battleRepo, ".acpxrc.json");
-  let rawConfig: string;
-  try {
-    rawConfig = await fs.readFile(configPath, "utf8");
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    if (code === "ENOENT") {
-      throw new Error(`Missing .acpxrc.json in battle repo: ${configPath}`);
-    }
-    throw error;
-  }
-
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(rawConfig);
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error);
-    throw new Error(`Invalid JSON in ${configPath}: ${reason}`);
-  }
-
-  const agents = asObject(parsed)?.agents;
-  const participantAAgentCommand = readAgentCommandFromConfig(agents, "participant-a", configPath);
-  const participantBAgentCommand = readAgentCommandFromConfig(agents, "participant-b", configPath);
-  const judgeAgentCommand = readAgentCommandFromConfig(agents, "judge", configPath);
-  return {
-    participantAAgentCommand,
-    participantBAgentCommand,
-    judgeAgentCommand,
-  };
-}
-
 async function runAskTurn(
   selection: TurnSelection,
   expectedRole: MatchRole,
@@ -998,14 +1023,14 @@ async function sendParticipantInformationalPrompt(
   phase: MatchPhase,
   _timeoutMs: number,
 ): Promise<void> {
-  const command = participantAgentCommandForRole(state, role);
+  const profile = participantProfileForRole(state, role);
   const workspaceDir = participantWorkspaceDirForRole(state, role);
   const sessionName = participantSessionNameForRole(state, role);
 
-  await ensureAgentSession(command, workspaceDir, sessionName);
+  await ensureAgentSession(profile, workspaceDir, sessionName);
   await recordRunnerPrompt(state, role, promptType, prompt, turn, phase);
   const result = await runAgentPromptCommand({
-    agentCommand: command,
+    profile,
     workspaceDir,
     sessionName,
     prompt,
@@ -1023,14 +1048,10 @@ async function sendJudgeInformationalPrompt(
   phase: MatchPhase,
   _timeoutMs: number,
 ): Promise<void> {
-  await ensureAgentSession(
-    state.judgeAgentCommand,
-    state.judgeWorkspaceDir,
-    state.judgeSessionName,
-  );
+  await ensureAgentSession(state.judgeProfile, state.judgeWorkspaceDir, state.judgeSessionName);
   await recordRunnerPrompt(state, "judge", promptType, prompt, turn, phase);
   const result = await runAgentPromptCommand({
-    agentCommand: state.judgeAgentCommand,
+    profile: state.judgeProfile,
     workspaceDir: state.judgeWorkspaceDir,
     sessionName: state.judgeSessionName,
     prompt,
@@ -1048,12 +1069,12 @@ async function sendParticipantStructuredPrompt<T>(
   normalize: (raw: unknown) => T,
   promptTypeLabel: "question" | "answer",
 ): Promise<ParticipantPromptResult<T>> {
-  const command = participantAgentCommandForRole(state, role);
+  const profile = participantProfileForRole(state, role);
   const workspaceDir = participantWorkspaceDirForRole(state, role);
   const sessionName = participantSessionNameForRole(state, role);
   const participantName = nameForRole(state, role);
 
-  await ensureAgentSession(command, workspaceDir, sessionName);
+  await ensureAgentSession(profile, workspaceDir, sessionName);
   await recordRunnerPrompt(
     state,
     role,
@@ -1064,7 +1085,7 @@ async function sendParticipantStructuredPrompt<T>(
   );
 
   const mainResult = await runAgentPromptCommand({
-    agentCommand: command,
+    profile,
     workspaceDir,
     sessionName,
     prompt,
@@ -1081,7 +1102,7 @@ async function sendParticipantStructuredPrompt<T>(
     );
   }
   if (mainAttempt.timedOut) {
-    await cancelAgentPrompt(command, workspaceDir, sessionName);
+    await cancelAgentPrompt(profile, workspaceDir, sessionName);
   }
   dropPendingTranscriptPrompt(
     state,
@@ -1101,7 +1122,7 @@ async function sendParticipantStructuredPrompt<T>(
     state.phase,
   );
   const graceResult = await runAgentPromptCommand({
-    agentCommand: command,
+    profile,
     workspaceDir,
     sessionName,
     prompt: gracePrompt,
@@ -1118,7 +1139,7 @@ async function sendParticipantStructuredPrompt<T>(
     );
   }
   if (graceAttempt.timedOut) {
-    await cancelAgentPrompt(command, workspaceDir, sessionName);
+    await cancelAgentPrompt(profile, workspaceDir, sessionName);
   }
   dropPendingTranscriptPrompt(
     state,
@@ -1147,15 +1168,11 @@ async function sendJudgeStructuredPrompt<T>(
   gracePrompt: string,
   normalize: (raw: unknown) => T,
 ): Promise<T> {
-  await ensureAgentSession(
-    state.judgeAgentCommand,
-    state.judgeWorkspaceDir,
-    state.judgeSessionName,
-  );
+  await ensureAgentSession(state.judgeProfile, state.judgeWorkspaceDir, state.judgeSessionName);
   await recordRunnerPrompt(state, "judge", "judge turn", prompt, state.currentTurn, state.phase);
 
   const mainResult = await runAgentPromptCommand({
-    agentCommand: state.judgeAgentCommand,
+    profile: state.judgeProfile,
     workspaceDir: state.judgeWorkspaceDir,
     sessionName: state.judgeSessionName,
     prompt,
@@ -1167,11 +1184,7 @@ async function sendJudgeStructuredPrompt<T>(
     return mainAttempt.value;
   }
   if (mainAttempt.timedOut) {
-    await cancelAgentPrompt(
-      state.judgeAgentCommand,
-      state.judgeWorkspaceDir,
-      state.judgeSessionName,
-    );
+    await cancelAgentPrompt(state.judgeProfile, state.judgeWorkspaceDir, state.judgeSessionName);
   }
   dropPendingTranscriptPrompt(
     state,
@@ -1189,7 +1202,7 @@ async function sendJudgeStructuredPrompt<T>(
     state.phase,
   );
   const graceResult = await runAgentPromptCommand({
-    agentCommand: state.judgeAgentCommand,
+    profile: state.judgeProfile,
     workspaceDir: state.judgeWorkspaceDir,
     sessionName: state.judgeSessionName,
     prompt: gracePrompt,
@@ -1201,11 +1214,7 @@ async function sendJudgeStructuredPrompt<T>(
     return graceAttempt.value;
   }
   if (graceAttempt.timedOut) {
-    await cancelAgentPrompt(
-      state.judgeAgentCommand,
-      state.judgeWorkspaceDir,
-      state.judgeSessionName,
-    );
+    await cancelAgentPrompt(state.judgeProfile, state.judgeWorkspaceDir, state.judgeSessionName);
   }
   dropPendingTranscriptPrompt(
     state,
@@ -1274,7 +1283,7 @@ function classifyStructuredPromptAttempt<T>(
 }
 
 async function ensureAgentSession(
-  agentCommand: string,
+  profile: string,
   workspaceDir: string,
   sessionName: string,
 ): Promise<void> {
@@ -1286,7 +1295,7 @@ async function ensureAgentSession(
       "--cwd",
       workspaceDir,
       "--agent",
-      agentCommand,
+      profile,
       "sessions",
       "ensure",
       "--name",
@@ -1300,7 +1309,7 @@ async function ensureAgentSession(
 }
 
 async function cancelAgentPrompt(
-  agentCommand: string,
+  profile: string,
   workspaceDir: string,
   sessionName: string,
 ): Promise<void> {
@@ -1312,7 +1321,7 @@ async function cancelAgentPrompt(
       "--cwd",
       workspaceDir,
       "--agent",
-      agentCommand,
+      profile,
       "cancel",
       "-s",
       sessionName,
@@ -1330,7 +1339,7 @@ async function cancelAgentPrompt(
 }
 
 async function runAgentPromptCommand(options: {
-  agentCommand: string;
+  profile: string;
   workspaceDir: string;
   sessionName: string;
   prompt: string;
@@ -1346,7 +1355,7 @@ async function runAgentPromptCommand(options: {
       "--cwd",
       options.workspaceDir,
       "--agent",
-      options.agentCommand,
+      options.profile,
       "prompt",
       ...(options.noWait ? ["--no-wait"] : []),
       "-s",
@@ -1496,20 +1505,6 @@ function asObject(value: unknown): Record<string, unknown> | null {
     return null;
   }
   return value as Record<string, unknown>;
-}
-
-function readAgentCommandFromConfig(
-  agentsValue: unknown,
-  agentName: string,
-  configPath: string,
-): string {
-  const agents = asObject(agentsValue);
-  const entry = asObject(agents?.[agentName]);
-  const command = entry?.command;
-  if (typeof command !== "string" || command.trim() === "") {
-    throw new Error(`Missing agents.${agentName}.command in ${configPath}`);
-  }
-  return command.trim();
 }
 
 function participantBriefingPrompt(
@@ -2598,8 +2593,8 @@ function nameForRole(state: MatchState, role: MatchRole): string {
   return role === "participant_a" ? state.participantAName : state.participantBName;
 }
 
-function participantAgentCommandForRole(state: MatchState, role: MatchRole): string {
-  return role === "participant_a" ? state.participantAAgentCommand : state.participantBAgentCommand;
+function participantProfileForRole(state: MatchState, role: MatchRole): string {
+  return role === "participant_a" ? state.participantAProfile : state.participantBProfile;
 }
 
 function participantSessionNameForRole(state: MatchState, role: MatchRole): string {
@@ -2703,8 +2698,11 @@ function renderManifest(state: MatchState): string {
     `- Transcript: \`${state.transcriptPath}\``,
     `- Message log: \`${state.messageLogPath}\``,
     `- Participant A: \`${state.participantAName}\``,
+    `- Participant A profile: \`${state.participantAProfile}\``,
     `- Participant B: \`${state.participantBName}\``,
+    `- Participant B profile: \`${state.participantBProfile}\``,
     `- Judge: \`${state.judgeName}\``,
+    `- Judge profile: \`${state.judgeProfile}\``,
     `- Questions per participant: \`${state.questionCount}\``,
     `- Sudden-death questions per participant: \`${state.suddenDeathQuestionCount}\``,
     `- Standard turns: \`${state.standardTurns}\``,

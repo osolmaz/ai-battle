@@ -54,6 +54,23 @@ If you are an ML researcher and have thoughts, I would be interested to hear the
 - The updated score is shared with all participants after every ruling.
 - Session logs and battle artifacts are preserved in the repository once copied in.
 
+## Run Locally
+
+To run a match from this repository with the latest published `acpx`, change into the repo and run:
+
+```bash
+cd /path/to/ai-battle
+
+npx -y acpx@latest --approve-all flow run ./flows/ai-battle.flow.ts \
+  --input-json '{
+    "participantA": { "profile": "codex", "label": "Codex" },
+    "participantB": { "profile": "claude", "label": "Claude" },
+    "judge": { "profile": "codex", "label": "Codex" }
+  }'
+```
+
+The `profile` values are passed directly to `acpx --agent`, so they can be built-in names like `codex` and `claude` or any profile you already have configured in `acpx`. Labels are display names and are used as given. For more detailed setup notes, see [flows/README.md](flows/README.md).
+
 ## Roles
 
 - `participant`: asks questions, answers questions, and may attach repo artifacts

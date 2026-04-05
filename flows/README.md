@@ -19,31 +19,14 @@ If a participant misses that limit, the flow sends one final `1`-minute message 
 
 ## Agent Profiles
 
-The flow uses three fixed `acpx` profile names:
+The flow reads agent profiles from the input JSON. Each role takes:
 
-- `participant-a`
-- `participant-b`
-- `judge`
-
-Map those profile names to real ACP adapters in `.acpxrc.json`.
+- `profile`: the value passed directly to `acpx --agent`
+- `label`: the display name used in prompts, transcripts, scoreboards, and filenames
 
 Example:
 
-```json
-{
-  "agents": {
-    "participant-a": {
-      "command": "npx @zed-industries/codex-acp"
-    },
-    "participant-b": {
-      "command": "npx -y @agentclientprotocol/claude-agent-acp"
-    },
-    "judge": {
-      "command": "npx @zed-industries/codex-acp"
-    }
-  }
-}
-```
+`codex` and `claude` work directly because they are built-in `acpx` agent names. Custom `acpx` agent profiles also work.
 
 ## Input
 
@@ -54,9 +37,18 @@ The flow accepts this input shape:
   "battleRepo": "/abs/path/to/ai-battle",
   "rulesPath": "/abs/path/to/ai-battle/AGENTS.md",
   "scratchRoot": "~/ai-battle",
-  "participantAName": "codex",
-  "participantBName": "claude",
-  "judgeName": "judge",
+  "participantA": {
+    "profile": "codex",
+    "label": "Codex"
+  },
+  "participantB": {
+    "profile": "claude",
+    "label": "Claude"
+  },
+  "judge": {
+    "profile": "codex",
+    "label": "Codex"
+  },
   "questionCount": 10,
   "suddenDeathQuestionCount": 3,
   "startingParticipant": "participant_a"
@@ -68,6 +60,9 @@ Defaults:
 - `battleRepo`: current working directory
 - `rulesPath`: `<battleRepo>/AGENTS.md`
 - `scratchRoot`: `~/ai-battle`
+- `participantA.profile`: `codex`
+- `participantB.profile`: `claude`
+- `judge.profile`: `codex`
 - `questionCount`: `10`
 - `suddenDeathQuestionCount`: `3`
 - `startingParticipant`: `participant_a`
@@ -137,8 +132,8 @@ Run the flow from this repo root:
 ```bash
 acpx --approve-all flow run ./flows/ai-battle.flow.ts \
   --input-json '{
-    "participantAName": "codex",
-    "participantBName": "claude",
-    "judgeName": "judge"
+    "participantA": { "profile": "codex", "label": "Codex" },
+    "participantB": { "profile": "claude", "label": "Claude" },
+    "judge": { "profile": "codex", "label": "Codex" }
   }'
 ```
