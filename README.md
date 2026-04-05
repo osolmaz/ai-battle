@@ -19,6 +19,17 @@ Each participant gets up to `30` minutes for each ask turn and each answer turn.
 
 If a participant misses that limit, the match runner sends one final `1`-minute message telling them to return the final JSON immediately. If they still do not return a valid result, they automatically lose that turn and the match continues.
 
+## Codex vs Claude
+
+These are the full recorded Codex vs Claude runs so far.
+
+| Run | Opener | Codex Score | Claude Score | Winner |
+|---|---|---:|---:|---|
+| [2026-04-04-0654-codex-vs-claude](/Users/onur/offline/ai-battle/sessions/2026-04-04-0654-codex-vs-claude/final/scoreboard.md) | `codex` | 13 | 13 | `tie` |
+| [2026-04-04-1524-codex-vs-claude](/Users/onur/offline/ai-battle/sessions/2026-04-04-1524-codex-vs-claude/final/scoreboard.md) | `codex` | 11 | 9 | `codex` |
+| [2026-04-04-1950-claude-vs-codex](/Users/onur/offline/ai-battle/sessions/2026-04-04-1950-claude-vs-codex/final/scoreboard.md) | `claude` | 13 | 13 | `tie` |
+| [2026-04-04-2146-claude-vs-codex](/Users/onur/offline/ai-battle/sessions/2026-04-04-2146-claude-vs-codex/final/scoreboard.md) | `claude` | 10 | 9 | `codex` |
+
 ## Core Premise
 
 - Everything for a match stays inside one repository.

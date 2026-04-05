@@ -20,6 +20,21 @@ For each run, keep:
 
 `messages.jsonl` and `transcript.md` should now be the human-readable transcript record built from the runner prompts plus the ACP session replies, not just the final question, answer, and ruling summaries.
 
+## Preferred Run Summary Format
+
+When summarizing recorded runs in markdown, use this table format:
+
+| Run | Opener | Codex Score | Claude Score | Winner |
+|---|---|---:|---:|---|
+
+Rules for this table:
+
+- include only finished full runs
+- use the participant who asked first as the `Opener`
+- split the final score into separate `Codex Score` and `Claude Score` columns
+- use `tie` when the match finishes level
+- use the winner name only when one side actually won
+
 ## Do Not Commit
 
 Do not commit:
