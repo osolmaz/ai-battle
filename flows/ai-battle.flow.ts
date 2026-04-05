@@ -294,6 +294,38 @@ type StructuredPromptFailure = {
 };
 
 type StructuredPromptAttempt<T> = { ok: true; value: T } | StructuredPromptFailure;
+type StructuredPromptTarget = {
+  transcriptTarget: TranscriptTarget;
+  displayName: string;
+  profile: string;
+  workspaceDir: string;
+  sessionName: string;
+};
+
+type StructuredPromptPhase = {
+  promptType: string;
+  prompt: string;
+  timeoutMs: number;
+  failureStageLabel: string;
+  throwOnNonRetryable: boolean;
+};
+
+type StructuredParseRetryPhase = {
+  promptType: string;
+  buildPrompt: (parseError: string) => string;
+  timeoutMs: number;
+  failureStageLabel: string;
+  throwOnNonRetryable: boolean;
+};
+
+type StructuredPromptRunFailure = {
+  ok: false;
+  mainFailure: StructuredPromptFailure;
+  parseRetryFailure: StructuredPromptFailure | null;
+  finalFailure: StructuredPromptFailure;
+};
+
+type StructuredPromptRunResult<T> = { ok: true; value: T } | StructuredPromptRunFailure;
 
 const PARTICIPANT_TURN_TIMEOUT_MS = 30 * 60_000;
 const PARTICIPANT_GRACE_TIMEOUT_MS = 60_000;
@@ -1082,143 +1114,59 @@ async function sendParticipantStructuredPrompt<T>(
   normalize: (raw: unknown) => T,
   promptTypeLabel: "question" | "answer",
 ): Promise<ParticipantPromptResult<T>> {
-  const profile = participantProfileForRole(state, role);
-  const workspaceDir = participantWorkspaceDirForRole(state, role);
-  const sessionName = participantSessionNameForRole(state, role);
-  const participantName = nameForRole(state, role);
-
-  await ensureAgentSession(profile, workspaceDir, sessionName);
-  await recordRunnerPrompt(
-    state,
-    role,
-    promptTypeLabel === "question" ? "asking turn" : "answering turn",
-    prompt,
-    state.currentTurn,
-    state.phase,
-  );
-
-  const mainResult = await runAgentPromptCommand({
-    profile,
-    workspaceDir,
-    sessionName,
-    prompt,
-    timeoutMs: PARTICIPANT_TURN_TIMEOUT_MS,
-  });
-  await syncAllTranscriptSessions(state);
-  const mainAttempt = classifyStructuredPromptAttempt(mainResult, normalize);
-  if (!isStructuredPromptFailure(mainAttempt)) {
-    return mainAttempt;
-  }
-  const mainFailure = mainAttempt;
-  if (!mainFailure.retryable) {
-    throw new Error(
-      `${participantName} failed during ${promptTypeLabel} turn: ${mainFailure.reason}`,
-    );
-  }
-  if (mainFailure.timedOut) {
-    await cancelAgentPrompt(profile, workspaceDir, sessionName);
-  }
   const promptType = promptTypeLabel === "question" ? "asking turn" : "answering turn";
-  dropPendingTranscriptPrompt(
+  const participantName = nameForRole(state, role);
+  const result = await runStructuredPromptWithRetries({
     state,
-    role,
-    (pendingPrompt) =>
-      pendingPrompt.turn === state.currentTurn && pendingPrompt.promptType === promptType,
-  );
-
-  let parseRetryFailure: StructuredPromptFailure | null = null;
-  if (mainFailure.parseError) {
-    const parseRetryPrompt = invalidStructuredOutputPrompt(mainFailure.parseError);
-    await recordRunnerPrompt(
-      state,
-      role,
-      `${promptType} parse retry`,
-      parseRetryPrompt,
-      state.currentTurn,
-      state.phase,
-    );
-    const parseRetryResult = await runAgentPromptCommand({
-      profile,
-      workspaceDir,
-      sessionName,
-      prompt: parseRetryPrompt,
+    target: {
+      transcriptTarget: role,
+      displayName: participantName,
+      profile: participantProfileForRole(state, role),
+      workspaceDir: participantWorkspaceDirForRole(state, role),
+      sessionName: participantSessionNameForRole(state, role),
+    },
+    normalize,
+    mainPhase: {
+      promptType,
+      prompt,
+      timeoutMs: PARTICIPANT_TURN_TIMEOUT_MS,
+      failureStageLabel: `${promptTypeLabel} turn`,
+      throwOnNonRetryable: true,
+    },
+    parseRetryPhase: {
+      promptType: `${promptType} parse retry`,
+      buildPrompt: invalidStructuredOutputPrompt,
       timeoutMs: PARTICIPANT_GRACE_TIMEOUT_MS,
-    });
-    await syncAllTranscriptSessions(state);
-    const parseRetryAttempt = classifyStructuredPromptAttempt(parseRetryResult, normalize);
-    if (!isStructuredPromptFailure(parseRetryAttempt)) {
-      return parseRetryAttempt;
-    }
-    parseRetryFailure = parseRetryAttempt;
-    if (!parseRetryFailure.retryable) {
-      throw new Error(
-        `${participantName} failed during ${promptTypeLabel} parse retry: ${parseRetryFailure.reason}`,
-      );
-    }
-    if (parseRetryFailure.timedOut) {
-      await cancelAgentPrompt(profile, workspaceDir, sessionName);
-    }
-    dropPendingTranscriptPrompt(
-      state,
-      role,
-      (pendingPrompt) =>
-        pendingPrompt.turn === state.currentTurn &&
-        pendingPrompt.promptType === `${promptType} parse retry`,
-    );
-  }
-
-  await recordRunnerPrompt(
-    state,
-    role,
-    `${promptType} finalization retry`,
-    gracePrompt,
-    state.currentTurn,
-    state.phase,
-  );
-  const graceResult = await runAgentPromptCommand({
-    profile,
-    workspaceDir,
-    sessionName,
-    prompt: gracePrompt,
-    timeoutMs: PARTICIPANT_GRACE_TIMEOUT_MS,
+      failureStageLabel: `${promptTypeLabel} parse retry`,
+      throwOnNonRetryable: true,
+    },
+    finalPhase: {
+      promptType: `${promptType} finalization retry`,
+      prompt: gracePrompt,
+      timeoutMs: PARTICIPANT_GRACE_TIMEOUT_MS,
+      failureStageLabel: `${promptTypeLabel} grace turn`,
+      throwOnNonRetryable: true,
+    },
   });
-  await syncAllTranscriptSessions(state);
-  const graceAttempt = classifyStructuredPromptAttempt(graceResult, normalize);
-  if (!isStructuredPromptFailure(graceAttempt)) {
-    return graceAttempt;
+  if (!isStructuredPromptRunFailure(result)) {
+    return result;
   }
-  const graceFailure = graceAttempt;
-  if (!graceFailure.retryable) {
-    throw new Error(
-      `${participantName} failed during ${promptTypeLabel} grace turn: ${graceFailure.reason}`,
-    );
-  }
-  if (graceFailure.timedOut) {
-    await cancelAgentPrompt(profile, workspaceDir, sessionName);
-  }
-  dropPendingTranscriptPrompt(
-    state,
-    role,
-    (pendingPrompt) =>
-      pendingPrompt.turn === state.currentTurn &&
-      pendingPrompt.promptType === `${promptType} finalization retry`,
-  );
 
-  const retrySummary = parseRetryFailure
+  const retrySummary = result.parseRetryFailure
     ? [
-        `Structured-output retry: ${parseRetryFailure.reason}`,
-        `Finalization retry: ${graceFailure.reason}`,
+        `Structured-output retry: ${result.parseRetryFailure.reason}`,
+        `Finalization retry: ${result.finalFailure.reason}`,
       ]
-    : [`Finalization retry: ${graceFailure.reason}`];
+    : [`Finalization retry: ${result.finalFailure.reason}`];
 
   return {
     ok: false,
     reason: [
       `${participantName} did not return a valid ${promptTypeLabel} within the allowed turn retries.`,
-      parseRetryFailure
+      result.parseRetryFailure
         ? `A one-minute structured-output retry was sent after the parse failure, followed by a one-minute finalization retry, but no valid ${promptTypeLabel} was returned.`
         : `A one-minute finalization retry was sent, but no valid ${promptTypeLabel} was returned.`,
-      `Main attempt: ${mainFailure.reason}`,
+      `Main attempt: ${result.mainFailure.reason}`,
       ...retrySummary,
       "Automatic turn loss recorded by the match runner.",
     ].join(" "),
@@ -1232,107 +1180,193 @@ async function sendJudgeStructuredPrompt<T>(
   gracePrompt: string,
   normalize: (raw: unknown) => T,
 ): Promise<T> {
-  await ensureAgentSession(state.judgeProfile, state.judgeWorkspaceDir, state.judgeSessionName);
-  await recordRunnerPrompt(state, "judge", "judge turn", prompt, state.currentTurn, state.phase);
-
-  const mainResult = await runAgentPromptCommand({
-    profile: state.judgeProfile,
-    workspaceDir: state.judgeWorkspaceDir,
-    sessionName: state.judgeSessionName,
-    prompt,
-    timeoutMs: JUDGE_TIMEOUT_MS,
-  });
-  await syncAllTranscriptSessions(state);
-  const mainAttempt = classifyStructuredPromptAttempt(mainResult, normalize);
-  if (!isStructuredPromptFailure(mainAttempt)) {
-    return mainAttempt.value;
-  }
-  const mainFailure = mainAttempt;
-  if (mainFailure.timedOut) {
-    await cancelAgentPrompt(state.judgeProfile, state.judgeWorkspaceDir, state.judgeSessionName);
-  }
-  dropPendingTranscriptPrompt(
+  const result = await runStructuredPromptWithRetries({
     state,
-    "judge",
-    (pendingPrompt) =>
-      pendingPrompt.turn === state.currentTurn && pendingPrompt.promptType === "judge turn",
-  );
-
-  let parseRetryFailure: StructuredPromptFailure | null = null;
-  if (mainFailure.parseError) {
-    const parseRetryPrompt = invalidStructuredOutputPrompt(mainFailure.parseError);
-    await recordRunnerPrompt(
-      state,
-      "judge",
-      "judge parse retry",
-      parseRetryPrompt,
-      state.currentTurn,
-      state.phase,
-    );
-    const parseRetryResult = await runAgentPromptCommand({
+    target: {
+      transcriptTarget: "judge",
+      displayName: "Judge",
       profile: state.judgeProfile,
       workspaceDir: state.judgeWorkspaceDir,
       sessionName: state.judgeSessionName,
-      prompt: parseRetryPrompt,
+    },
+    normalize,
+    mainPhase: {
+      promptType: "judge turn",
+      prompt,
+      timeoutMs: JUDGE_TIMEOUT_MS,
+      failureStageLabel: "judge turn",
+      throwOnNonRetryable: false,
+    },
+    parseRetryPhase: {
+      promptType: "judge parse retry",
+      buildPrompt: invalidStructuredOutputPrompt,
       timeoutMs: PARTICIPANT_GRACE_TIMEOUT_MS,
-    });
-    await syncAllTranscriptSessions(state);
-    const parseRetryAttempt = classifyStructuredPromptAttempt(parseRetryResult, normalize);
-    if (!isStructuredPromptFailure(parseRetryAttempt)) {
-      return parseRetryAttempt.value;
-    }
-    parseRetryFailure = parseRetryAttempt;
-    if (parseRetryFailure.timedOut) {
-      await cancelAgentPrompt(state.judgeProfile, state.judgeWorkspaceDir, state.judgeSessionName);
-    }
-    dropPendingTranscriptPrompt(
-      state,
-      "judge",
-      (pendingPrompt) =>
-        pendingPrompt.turn === state.currentTurn &&
-        pendingPrompt.promptType === "judge parse retry",
-    );
-  }
-
-  await recordRunnerPrompt(
-    state,
-    "judge",
-    "judge finalization retry",
-    gracePrompt,
-    state.currentTurn,
-    state.phase,
-  );
-  const graceResult = await runAgentPromptCommand({
-    profile: state.judgeProfile,
-    workspaceDir: state.judgeWorkspaceDir,
-    sessionName: state.judgeSessionName,
-    prompt: gracePrompt,
-    timeoutMs: PARTICIPANT_GRACE_TIMEOUT_MS,
+      failureStageLabel: "judge parse retry",
+      throwOnNonRetryable: false,
+    },
+    finalPhase: {
+      promptType: "judge finalization retry",
+      prompt: gracePrompt,
+      timeoutMs: PARTICIPANT_GRACE_TIMEOUT_MS,
+      failureStageLabel: "judge grace turn",
+      throwOnNonRetryable: false,
+    },
   });
-  await syncAllTranscriptSessions(state);
-  const graceAttempt = classifyStructuredPromptAttempt(graceResult, normalize);
-  if (!isStructuredPromptFailure(graceAttempt)) {
-    return graceAttempt.value;
+  if (!isStructuredPromptRunFailure(result)) {
+    return result.value;
   }
-  const graceFailure = graceAttempt;
-  if (graceFailure.timedOut) {
-    await cancelAgentPrompt(state.judgeProfile, state.judgeWorkspaceDir, state.judgeSessionName);
-  }
-  dropPendingTranscriptPrompt(
-    state,
-    "judge",
-    (pendingPrompt) =>
-      pendingPrompt.turn === state.currentTurn &&
-      pendingPrompt.promptType === "judge finalization retry",
-  );
 
   throw new Error(
     [
       `Judge did not return a valid ruling.`,
-      `Main attempt: ${mainFailure.reason}`,
-      ...(parseRetryFailure ? [`Structured-output retry: ${parseRetryFailure.reason}`] : []),
-      `Finalization retry: ${graceFailure.reason}`,
+      `Main attempt: ${result.mainFailure.reason}`,
+      ...(result.parseRetryFailure
+        ? [`Structured-output retry: ${result.parseRetryFailure.reason}`]
+        : []),
+      `Finalization retry: ${result.finalFailure.reason}`,
     ].join(" "),
+  );
+}
+
+async function runStructuredPromptWithRetries<T>(options: {
+  state: MatchState;
+  target: StructuredPromptTarget;
+  normalize: (raw: unknown) => T;
+  mainPhase: StructuredPromptPhase;
+  parseRetryPhase: StructuredParseRetryPhase;
+  finalPhase: StructuredPromptPhase;
+}): Promise<StructuredPromptRunResult<T>> {
+  await ensureAgentSession(
+    options.target.profile,
+    options.target.workspaceDir,
+    options.target.sessionName,
+  );
+
+  const mainAttempt = await runStructuredPromptPhase({
+    state: options.state,
+    target: options.target,
+    promptType: options.mainPhase.promptType,
+    prompt: options.mainPhase.prompt,
+    timeoutMs: options.mainPhase.timeoutMs,
+    normalize: options.normalize,
+  });
+  if (!isStructuredPromptFailure(mainAttempt)) {
+    return mainAttempt;
+  }
+  const mainFailure = mainAttempt;
+  if (!mainFailure.retryable && options.mainPhase.throwOnNonRetryable) {
+    throw new Error(
+      `${options.target.displayName} failed during ${options.mainPhase.failureStageLabel}: ${mainFailure.reason}`,
+    );
+  }
+  await cleanupStructuredPromptFailure(
+    options.state,
+    options.target,
+    options.mainPhase.promptType,
+    mainFailure,
+  );
+
+  let parseRetryFailure: StructuredPromptFailure | null = null;
+  if (mainFailure.parseError) {
+    const parseRetryPrompt = options.parseRetryPhase.buildPrompt(mainFailure.parseError);
+    const parseRetryAttempt = await runStructuredPromptPhase({
+      state: options.state,
+      target: options.target,
+      promptType: options.parseRetryPhase.promptType,
+      prompt: parseRetryPrompt,
+      timeoutMs: options.parseRetryPhase.timeoutMs,
+      normalize: options.normalize,
+    });
+    if (!isStructuredPromptFailure(parseRetryAttempt)) {
+      return parseRetryAttempt;
+    }
+    parseRetryFailure = parseRetryAttempt;
+    if (!parseRetryFailure.retryable && options.parseRetryPhase.throwOnNonRetryable) {
+      throw new Error(
+        `${options.target.displayName} failed during ${options.parseRetryPhase.failureStageLabel}: ${parseRetryFailure.reason}`,
+      );
+    }
+    await cleanupStructuredPromptFailure(
+      options.state,
+      options.target,
+      options.parseRetryPhase.promptType,
+      parseRetryFailure,
+    );
+  }
+
+  const finalAttempt = await runStructuredPromptPhase({
+    state: options.state,
+    target: options.target,
+    promptType: options.finalPhase.promptType,
+    prompt: options.finalPhase.prompt,
+    timeoutMs: options.finalPhase.timeoutMs,
+    normalize: options.normalize,
+  });
+  if (!isStructuredPromptFailure(finalAttempt)) {
+    return finalAttempt;
+  }
+  const finalFailure = finalAttempt;
+  if (!finalFailure.retryable && options.finalPhase.throwOnNonRetryable) {
+    throw new Error(
+      `${options.target.displayName} failed during ${options.finalPhase.failureStageLabel}: ${finalFailure.reason}`,
+    );
+  }
+  await cleanupStructuredPromptFailure(
+    options.state,
+    options.target,
+    options.finalPhase.promptType,
+    finalFailure,
+  );
+
+  return {
+    ok: false,
+    mainFailure,
+    parseRetryFailure,
+    finalFailure,
+  };
+}
+
+async function runStructuredPromptPhase<T>(options: {
+  state: MatchState;
+  target: StructuredPromptTarget;
+  promptType: string;
+  prompt: string;
+  timeoutMs: number;
+  normalize: (raw: unknown) => T;
+}): Promise<StructuredPromptAttempt<T>> {
+  await recordRunnerPrompt(
+    options.state,
+    options.target.transcriptTarget,
+    options.promptType,
+    options.prompt,
+    options.state.currentTurn,
+    options.state.phase,
+  );
+  const result = await runAgentPromptCommand({
+    profile: options.target.profile,
+    workspaceDir: options.target.workspaceDir,
+    sessionName: options.target.sessionName,
+    prompt: options.prompt,
+    timeoutMs: options.timeoutMs,
+  });
+  await syncAllTranscriptSessions(options.state);
+  return classifyStructuredPromptAttempt(result, options.normalize);
+}
+
+async function cleanupStructuredPromptFailure(
+  state: MatchState,
+  target: StructuredPromptTarget,
+  promptType: string,
+  failure: StructuredPromptFailure,
+): Promise<void> {
+  if (failure.timedOut) {
+    await cancelAgentPrompt(target.profile, target.workspaceDir, target.sessionName);
+  }
+  dropPendingTranscriptPrompt(
+    state,
+    target.transcriptTarget,
+    (pendingPrompt) =>
+      pendingPrompt.turn === state.currentTurn && pendingPrompt.promptType === promptType,
   );
 }
 
@@ -1616,6 +1650,12 @@ function isStructuredPromptFailure<T>(
   attempt: StructuredPromptAttempt<T>,
 ): attempt is StructuredPromptFailure {
   return !attempt.ok;
+}
+
+function isStructuredPromptRunFailure<T>(
+  result: StructuredPromptRunResult<T>,
+): result is StructuredPromptRunFailure {
+  return !result.ok;
 }
 
 function participantBriefingPrompt(
