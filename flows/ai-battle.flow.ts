@@ -285,6 +285,15 @@ type ParticipantPromptFailure = {
 };
 
 type ParticipantPromptResult<T> = ParticipantPromptSuccess<T> | ParticipantPromptFailure;
+type StructuredPromptFailure = {
+  ok: false;
+  retryable: boolean;
+  timedOut: boolean;
+  reason: string;
+  parseError?: string;
+};
+
+type StructuredPromptAttempt<T> = { ok: true; value: T } | StructuredPromptFailure;
 
 const PARTICIPANT_TURN_TIMEOUT_MS = 30 * 60_000;
 const PARTICIPANT_GRACE_TIMEOUT_MS = 60_000;
@@ -956,22 +965,23 @@ async function runAskTurn(
     selection.state,
     selection.askerRole,
     askPrompt(selection),
+    (parseError) => askParseRetryPrompt(selection, parseError),
     askGracePrompt(selection),
     normalizeAskResponse,
     "question",
   );
 
-  if (result.ok) {
+  if (isParticipantPromptFailure(result)) {
     return {
-      route:
-        selection.answererRole === "participant_a" ? "wait_participant_a" : "wait_participant_b",
-      askResponse: result.value,
+      route: "write_ask_forfeit_turn",
+      reason: result.reason,
     };
   }
 
   return {
-    route: "write_ask_forfeit_turn",
-    reason: result.reason,
+    route:
+      selection.answererRole === "participant_a" ? "wait_participant_a" : "wait_participant_b",
+    askResponse: result.value,
   };
 }
 
@@ -987,21 +997,22 @@ async function runAnswerTurn(
     turn.state,
     turn.answererRole,
     answerPrompt(turn),
+    (parseError) => answerParseRetryPrompt(turn, parseError),
     answerGracePrompt(turn),
     normalizeAnswerResponse,
     "answer",
   );
 
-  if (result.ok) {
+  if (isParticipantPromptFailure(result)) {
     return {
-      route: "write_answer",
-      answerResponse: result.value,
+      route: "write_answer_forfeit_turn",
+      reason: result.reason,
     };
   }
 
   return {
-    route: "write_answer_forfeit_turn",
-    reason: result.reason,
+    route: "write_answer",
+    answerResponse: result.value,
   };
 }
 
@@ -1009,6 +1020,7 @@ async function runJudgeTurn(turn: WrittenAnswer): Promise<JudgeResponse> {
   return await sendJudgeStructuredPrompt(
     turn.state,
     judgePrompt(turn),
+    (parseError) => judgeParseRetryPrompt(turn, parseError),
     judgeGracePrompt(turn),
     normalizeJudgeResponse,
   );
@@ -1065,6 +1077,7 @@ async function sendParticipantStructuredPrompt<T>(
   state: MatchState,
   role: MatchRole,
   prompt: string,
+  invalidStructuredOutputPrompt: (parseError: string) => string,
   gracePrompt: string,
   normalize: (raw: unknown) => T,
   promptTypeLabel: "question" | "answer",
@@ -1093,30 +1106,71 @@ async function sendParticipantStructuredPrompt<T>(
   });
   await syncAllTranscriptSessions(state);
   const mainAttempt = classifyStructuredPromptAttempt(mainResult, normalize);
-  if (mainAttempt.ok) {
+  if (!isStructuredPromptFailure(mainAttempt)) {
     return mainAttempt;
   }
-  if (!mainAttempt.retryable) {
+  const mainFailure = mainAttempt;
+  if (!mainFailure.retryable) {
     throw new Error(
-      `${participantName} failed during ${promptTypeLabel} turn: ${mainAttempt.reason}`,
+      `${participantName} failed during ${promptTypeLabel} turn: ${mainFailure.reason}`,
     );
   }
-  if (mainAttempt.timedOut) {
+  if (mainFailure.timedOut) {
     await cancelAgentPrompt(profile, workspaceDir, sessionName);
   }
+  const promptType = promptTypeLabel === "question" ? "asking turn" : "answering turn";
   dropPendingTranscriptPrompt(
     state,
     role,
     (pendingPrompt) =>
-      pendingPrompt.turn === state.currentTurn &&
-      pendingPrompt.promptType ===
-        (promptTypeLabel === "question" ? "asking turn" : "answering turn"),
+      pendingPrompt.turn === state.currentTurn && pendingPrompt.promptType === promptType,
   );
+
+  let parseRetryFailure: StructuredPromptFailure | null = null;
+  if (mainFailure.parseError) {
+    const parseRetryPrompt = invalidStructuredOutputPrompt(mainFailure.parseError);
+    await recordRunnerPrompt(
+      state,
+      role,
+      `${promptType} parse retry`,
+      parseRetryPrompt,
+      state.currentTurn,
+      state.phase,
+    );
+    const parseRetryResult = await runAgentPromptCommand({
+      profile,
+      workspaceDir,
+      sessionName,
+      prompt: parseRetryPrompt,
+      timeoutMs: PARTICIPANT_GRACE_TIMEOUT_MS,
+    });
+    await syncAllTranscriptSessions(state);
+    const parseRetryAttempt = classifyStructuredPromptAttempt(parseRetryResult, normalize);
+    if (!isStructuredPromptFailure(parseRetryAttempt)) {
+      return parseRetryAttempt;
+    }
+    parseRetryFailure = parseRetryAttempt;
+    if (!parseRetryFailure.retryable) {
+      throw new Error(
+        `${participantName} failed during ${promptTypeLabel} parse retry: ${parseRetryFailure.reason}`,
+      );
+    }
+    if (parseRetryFailure.timedOut) {
+      await cancelAgentPrompt(profile, workspaceDir, sessionName);
+    }
+    dropPendingTranscriptPrompt(
+      state,
+      role,
+      (pendingPrompt) =>
+        pendingPrompt.turn === state.currentTurn &&
+        pendingPrompt.promptType === `${promptType} parse retry`,
+    );
+  }
 
   await recordRunnerPrompt(
     state,
     role,
-    `${promptTypeLabel === "question" ? "asking turn" : "answering turn"} finalization retry`,
+    `${promptType} finalization retry`,
     gracePrompt,
     state.currentTurn,
     state.phase,
@@ -1130,15 +1184,16 @@ async function sendParticipantStructuredPrompt<T>(
   });
   await syncAllTranscriptSessions(state);
   const graceAttempt = classifyStructuredPromptAttempt(graceResult, normalize);
-  if (graceAttempt.ok) {
+  if (!isStructuredPromptFailure(graceAttempt)) {
     return graceAttempt;
   }
-  if (!graceAttempt.retryable) {
+  const graceFailure = graceAttempt;
+  if (!graceFailure.retryable) {
     throw new Error(
-      `${participantName} failed during ${promptTypeLabel} grace turn: ${graceAttempt.reason}`,
+      `${participantName} failed during ${promptTypeLabel} grace turn: ${graceFailure.reason}`,
     );
   }
-  if (graceAttempt.timedOut) {
+  if (graceFailure.timedOut) {
     await cancelAgentPrompt(profile, workspaceDir, sessionName);
   }
   dropPendingTranscriptPrompt(
@@ -1146,17 +1201,25 @@ async function sendParticipantStructuredPrompt<T>(
     role,
     (pendingPrompt) =>
       pendingPrompt.turn === state.currentTurn &&
-      pendingPrompt.promptType ===
-        `${promptTypeLabel === "question" ? "asking turn" : "answering turn"} finalization retry`,
+      pendingPrompt.promptType === `${promptType} finalization retry`,
   );
+
+  const retrySummary = parseRetryFailure
+    ? [
+        `Structured-output retry: ${parseRetryFailure.reason}`,
+        `Finalization retry: ${graceFailure.reason}`,
+      ]
+    : [`Finalization retry: ${graceFailure.reason}`];
 
   return {
     ok: false,
     reason: [
-      `${participantName} did not return a valid ${promptTypeLabel} within the 30-minute turn window.`,
-      `A one-minute finalization retry was sent, but no valid ${promptTypeLabel} was returned.`,
-      `Main attempt: ${mainAttempt.reason}`,
-      `Finalization retry: ${graceAttempt.reason}`,
+      `${participantName} did not return a valid ${promptTypeLabel} within the allowed turn retries.`,
+      parseRetryFailure
+        ? `A one-minute structured-output retry was sent after the parse failure, followed by a one-minute finalization retry, but no valid ${promptTypeLabel} was returned.`
+        : `A one-minute finalization retry was sent, but no valid ${promptTypeLabel} was returned.`,
+      `Main attempt: ${mainFailure.reason}`,
+      ...retrySummary,
       "Automatic turn loss recorded by the match runner.",
     ].join(" "),
   };
@@ -1165,6 +1228,7 @@ async function sendParticipantStructuredPrompt<T>(
 async function sendJudgeStructuredPrompt<T>(
   state: MatchState,
   prompt: string,
+  invalidStructuredOutputPrompt: (parseError: string) => string,
   gracePrompt: string,
   normalize: (raw: unknown) => T,
 ): Promise<T> {
@@ -1180,10 +1244,11 @@ async function sendJudgeStructuredPrompt<T>(
   });
   await syncAllTranscriptSessions(state);
   const mainAttempt = classifyStructuredPromptAttempt(mainResult, normalize);
-  if (mainAttempt.ok) {
+  if (!isStructuredPromptFailure(mainAttempt)) {
     return mainAttempt.value;
   }
-  if (mainAttempt.timedOut) {
+  const mainFailure = mainAttempt;
+  if (mainFailure.timedOut) {
     await cancelAgentPrompt(state.judgeProfile, state.judgeWorkspaceDir, state.judgeSessionName);
   }
   dropPendingTranscriptPrompt(
@@ -1192,6 +1257,42 @@ async function sendJudgeStructuredPrompt<T>(
     (pendingPrompt) =>
       pendingPrompt.turn === state.currentTurn && pendingPrompt.promptType === "judge turn",
   );
+
+  let parseRetryFailure: StructuredPromptFailure | null = null;
+  if (mainFailure.parseError) {
+    const parseRetryPrompt = invalidStructuredOutputPrompt(mainFailure.parseError);
+    await recordRunnerPrompt(
+      state,
+      "judge",
+      "judge parse retry",
+      parseRetryPrompt,
+      state.currentTurn,
+      state.phase,
+    );
+    const parseRetryResult = await runAgentPromptCommand({
+      profile: state.judgeProfile,
+      workspaceDir: state.judgeWorkspaceDir,
+      sessionName: state.judgeSessionName,
+      prompt: parseRetryPrompt,
+      timeoutMs: PARTICIPANT_GRACE_TIMEOUT_MS,
+    });
+    await syncAllTranscriptSessions(state);
+    const parseRetryAttempt = classifyStructuredPromptAttempt(parseRetryResult, normalize);
+    if (!isStructuredPromptFailure(parseRetryAttempt)) {
+      return parseRetryAttempt.value;
+    }
+    parseRetryFailure = parseRetryAttempt;
+    if (parseRetryFailure.timedOut) {
+      await cancelAgentPrompt(state.judgeProfile, state.judgeWorkspaceDir, state.judgeSessionName);
+    }
+    dropPendingTranscriptPrompt(
+      state,
+      "judge",
+      (pendingPrompt) =>
+        pendingPrompt.turn === state.currentTurn &&
+        pendingPrompt.promptType === "judge parse retry",
+    );
+  }
 
   await recordRunnerPrompt(
     state,
@@ -1210,10 +1311,11 @@ async function sendJudgeStructuredPrompt<T>(
   });
   await syncAllTranscriptSessions(state);
   const graceAttempt = classifyStructuredPromptAttempt(graceResult, normalize);
-  if (graceAttempt.ok) {
+  if (!isStructuredPromptFailure(graceAttempt)) {
     return graceAttempt.value;
   }
-  if (graceAttempt.timedOut) {
+  const graceFailure = graceAttempt;
+  if (graceFailure.timedOut) {
     await cancelAgentPrompt(state.judgeProfile, state.judgeWorkspaceDir, state.judgeSessionName);
   }
   dropPendingTranscriptPrompt(
@@ -1227,8 +1329,9 @@ async function sendJudgeStructuredPrompt<T>(
   throw new Error(
     [
       `Judge did not return a valid ruling.`,
-      `Main attempt: ${mainAttempt.reason}`,
-      `Finalization retry: ${graceAttempt.reason}`,
+      `Main attempt: ${mainFailure.reason}`,
+      ...(parseRetryFailure ? [`Structured-output retry: ${parseRetryFailure.reason}`] : []),
+      `Finalization retry: ${graceFailure.reason}`,
     ].join(" "),
   );
 }
@@ -1236,17 +1339,7 @@ async function sendJudgeStructuredPrompt<T>(
 function classifyStructuredPromptAttempt<T>(
   result: CliCommandResult,
   normalize: (raw: unknown) => T,
-):
-  | {
-      ok: true;
-      value: T;
-    }
-  | {
-      ok: false;
-      retryable: boolean;
-      timedOut: boolean;
-      reason: string;
-    } {
+): StructuredPromptAttempt<T> {
   if (result.exitCode === 0) {
     try {
       const raw = extractJsonObject(result.stdout);
@@ -1261,6 +1354,7 @@ function classifyStructuredPromptAttempt<T>(
         retryable: true,
         timedOut: false,
         reason: `returned invalid structured output: ${reason}`,
+        parseError: reason,
       };
     }
   }
@@ -1512,6 +1606,18 @@ function asObject(value: unknown): Record<string, unknown> | null {
   return value as Record<string, unknown>;
 }
 
+function isParticipantPromptFailure<T>(
+  result: ParticipantPromptResult<T>,
+): result is ParticipantPromptFailure {
+  return !result.ok;
+}
+
+function isStructuredPromptFailure<T>(
+  attempt: StructuredPromptAttempt<T>,
+): attempt is StructuredPromptFailure {
+  return !attempt.ok;
+}
+
 function participantBriefingPrompt(
   state: MatchState,
   options: {
@@ -1600,15 +1706,7 @@ function askPrompt(selection: TurnSelection): string {
     "Use your private empty working directory as scratchpad if useful, but keep tool use light and make the question stand on its own.",
     "",
     "Return exactly one JSON object with this shape:",
-    "{",
-    '  "publicQuestion": "text shown to the other participant",',
-    '  "judgeNote": {',
-    '    "intendedAnswer": "short answer key for the judge",',
-    '    "validityReason": "why this question is valid and answerable",',
-    '    "edgeReason": "why you believe this question favors you over the opponent",',
-    '    "evidencePaths": ["optional/path"]',
-    "  }",
-    "}",
+    ...askResponseShapeLines(),
     "The hidden judge note will not be shown to the other participant.",
   ].join("\n");
 }
@@ -1621,17 +1719,19 @@ function askGracePrompt(selection: TurnSelection): string {
     "You have 1 minute.",
     "",
     "Output only one JSON object with this shape:",
-    "{",
-    '  "publicQuestion": "text shown to the other participant",',
-    '  "judgeNote": {',
-    '    "intendedAnswer": "short answer key for the judge",',
-    '    "validityReason": "why this question is valid and answerable",',
-    '    "edgeReason": "why you believe this question favors you over the opponent",',
-    '    "evidencePaths": ["optional/path"]',
-    "  }",
-    "}",
+    ...askResponseShapeLines(),
     "If you do not return valid JSON now, you lose the turn.",
   ].join("\n");
+}
+
+function askParseRetryPrompt(selection: TurnSelection, parseError: string): string {
+  return buildParseRetryPrompt({
+    heading: `Structured-output retry for ${selection.askerName}.`,
+    parseError,
+    schemaLines: askResponseShapeLines(),
+    returnLine: "Return your question as one raw JSON object right now.",
+    failureLine: "If you do not return valid JSON now, you may still lose the turn.",
+  });
 }
 
 function judgeGracePrompt(turn: WrittenAnswer): string {
@@ -1642,11 +1742,18 @@ function judgeGracePrompt(turn: WrittenAnswer): string {
     "You have 1 minute.",
     "",
     "Output only one JSON object with this shape:",
-    "{",
-    '  "outcome": "answerer_point" | "asker_point" | "flawed_caught" | "flawed_missed",',
-    '  "reason": "short explanation"',
-    "}",
+    ...judgeResponseShapeLines(),
   ].join("\n");
+}
+
+function judgeParseRetryPrompt(turn: WrittenAnswer, parseError: string): string {
+  return buildParseRetryPrompt({
+    heading: `Structured-output retry for judge ${turn.state.judgeName}.`,
+    parseError,
+    schemaLines: judgeResponseShapeLines(),
+    returnLine: "Return your ruling as one raw JSON object right now.",
+    failureLine: "If you do not return valid JSON now, the ruling may still fail.",
+  });
 }
 
 function waitPrompt(selection: TurnSelection, waitingRole: MatchRole): string {
@@ -1730,11 +1837,7 @@ function answerPrompt(turn: WrittenQuestion): string {
     "Use your private empty working directory as scratchpad if useful.",
     "",
     "Return exactly one JSON object with this shape:",
-    "{",
-    '  "answer": "your answer or short explanation",',
-    '  "flawClaim": "text if the question is flawed, otherwise null",',
-    '  "artifactPaths": ["optional/path"]',
-    "}",
+    ...answerResponseShapeLines(),
   ].join("\n");
 }
 
@@ -1746,13 +1849,79 @@ function answerGracePrompt(turn: WrittenQuestion): string {
     "You have 1 minute.",
     "",
     "Output only one JSON object with this shape:",
+    ...answerResponseShapeLines(),
+    "If you do not return valid JSON now, you lose the turn.",
+  ].join("\n");
+}
+
+function answerParseRetryPrompt(turn: WrittenQuestion, parseError: string): string {
+  return buildParseRetryPrompt({
+    heading: `Structured-output retry for ${turn.answererName}.`,
+    parseError,
+    schemaLines: answerResponseShapeLines(),
+    returnLine: "Return your answer as one raw JSON object right now.",
+    failureLine: "If you do not return valid JSON now, you may still lose the turn.",
+  });
+}
+
+function askResponseShapeLines(): string[] {
+  return [
+    "{",
+    '  "publicQuestion": "text shown to the other participant",',
+    '  "judgeNote": {',
+    '    "intendedAnswer": "short answer key for the judge",',
+    '    "validityReason": "why this question is valid and answerable",',
+    '    "edgeReason": "why you believe this question favors you over the opponent",',
+    '    "evidencePaths": ["optional/path"]',
+    "  }",
+    "}",
+  ];
+}
+
+function answerResponseShapeLines(): string[] {
+  return [
     "{",
     '  "answer": "your answer or short explanation",',
     '  "flawClaim": "text if the question is flawed, otherwise null",',
     '  "artifactPaths": ["optional/path"]',
     "}",
-    "If you do not return valid JSON now, you lose the turn.",
+  ];
+}
+
+function judgeResponseShapeLines(): string[] {
+  return [
+    "{",
+    '  "outcome": "answerer_point" | "asker_point" | "flawed_caught" | "flawed_missed",',
+    '  "reason": "short explanation"',
+    "}",
+  ];
+}
+
+function buildParseRetryPrompt(options: {
+  heading: string;
+  parseError: string;
+  schemaLines: string[];
+  returnLine: string;
+  failureLine: string;
+}): string {
+  return [
+    options.heading,
+    "Your previous reply could not be parsed as the required JSON object.",
+    `Parse error: ${sanitizeParseError(options.parseError)}`,
+    options.returnLine,
+    "Do not wrap it in Markdown fences.",
+    "Do not add commentary before or after the JSON.",
+    "No more tool use.",
+    "You have 1 minute.",
+    "",
+    "Output only one JSON object with this shape:",
+    ...options.schemaLines,
+    options.failureLine,
   ].join("\n");
+}
+
+function sanitizeParseError(parseError: string): string {
+  return parseError.replace(/\s+/gu, " ").trim();
 }
 
 async function writeAnswer(
