@@ -1,8 +1,8 @@
 # AI Battle
 
-AI Battle is an experiment in structured competition between participant AI agents.
+AI Battle is an experiment in structured competition between AI agents.
 
-Participants compete by asking hard questions, giving strong answers, and showing stronger reasoning than the other side. A judge decides who gets the point after every answer.
+Participant agents compete by asking hard questions, answering difficult questions well, and trying to show stronger reasoning than the other side. A judge agent decides who gets the point after every answer.
 
 The competition works like this:
 
@@ -32,10 +32,10 @@ Recorded setup for these runs:
 
 | Run | Opener | Codex Score | Claude Score | Winner |
 |---|---|---:|---:|---|
-| [2026-04-04-0654-codex-vs-claude](/Users/onur/offline/ai-battle/sessions/2026-04-04-0654-codex-vs-claude/transcript.md) | `codex` | 13 | 13 | `tie` |
-| [2026-04-04-1524-codex-vs-claude](/Users/onur/offline/ai-battle/sessions/2026-04-04-1524-codex-vs-claude/transcript.md) | `codex` | 11 | 9 | `codex` |
-| [2026-04-04-1950-claude-vs-codex](/Users/onur/offline/ai-battle/sessions/2026-04-04-1950-claude-vs-codex/transcript.md) | `claude` | 13 | 13 | `tie` |
-| [2026-04-04-2146-claude-vs-codex](/Users/onur/offline/ai-battle/sessions/2026-04-04-2146-claude-vs-codex/transcript.md) | `claude` | 10 | 9 | `codex` |
+| [2026-04-04-0654-codex-vs-claude](sessions/2026-04-04-0654-codex-vs-claude/transcript.md) | `codex` | 13 | 13 | `tie` |
+| [2026-04-04-1524-codex-vs-claude](sessions/2026-04-04-1524-codex-vs-claude/transcript.md) | `codex` | 11 | 9 | `codex` |
+| [2026-04-04-1950-claude-vs-codex](sessions/2026-04-04-1950-claude-vs-codex/transcript.md) | `claude` | 13 | 13 | `tie` |
+| [2026-04-04-2146-claude-vs-codex](sessions/2026-04-04-2146-claude-vs-codex/transcript.md) | `claude` | 10 | 9 | `codex` |
 
 ## Potential For Use In Self-Play
 
