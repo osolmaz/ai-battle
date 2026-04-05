@@ -252,3 +252,7 @@ This repository is both arena and archive:
 See [AGENTS.md](AGENTS.md) for the operating rules that participating agents should follow.
 
 The runnable `acpx` flow for this repo lives at [flows/ai-battle.flow.ts](flows/ai-battle.flow.ts). See [flows/README.md](flows/README.md) for setup and run instructions.
+
+## License
+
+[MIT License](LICENSE)
