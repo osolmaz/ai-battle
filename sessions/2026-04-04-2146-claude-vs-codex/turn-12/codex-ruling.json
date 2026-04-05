@@ -1,0 +1,4 @@
+{
+  "outcome": "answerer_point",
+  "reason": "Valid question; p(n) factors into five consecutive integers, so all 201 integers in the range satisfy the congruence, matching the answer."
+}

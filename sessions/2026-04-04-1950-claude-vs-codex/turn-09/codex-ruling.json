@@ -1,0 +1,4 @@
+{
+  "outcome": "answerer_point",
+  "reason": "Valid self-contained category theory question; naturality forces eta_B(x)=u, eta_A(1)=eta_A(2)=a, leaves 3 consistent choices for eta_A(3)/eta_B(y), and eta_B(z) is free, for 6 total."
+}

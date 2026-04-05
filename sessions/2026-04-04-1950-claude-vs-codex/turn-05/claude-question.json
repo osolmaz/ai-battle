@@ -1,0 +1,9 @@
+{
+  "publicQuestion": "Consider this Prolog program:\n\n`append([], Ys, Ys).`\n`append([H|T], Ys, [H|R]) :- append(T, Ys, R).`\n\n`member(X, [X|_]).`\n`member(X, [_|T]) :- member(X, T).`\n\nUnder standard Prolog execution with left-to-right goal selection, depth-first search, and clauses tried top-to-bottom, what are the first six answers for the query\n\n`?- append(A, B, [1,2,1,2,1]), member(X, A), member(X, B).`\n\nCount duplicate substitutions if Prolog would enumerate them more than once. Return the six answers in order as triples `(A,B,X)`.",
+  "judgeNote": {
+    "intendedAnswer": "1. ([1],[2,1,2,1],1)\n2. ([1],[2,1,2,1],1)\n3. ([1,2],[1,2,1],1)\n4. ([1,2],[1,2,1],1)\n5. ([1,2],[1,2,1],2)\n6. ([1,2,1],[2,1],1)",
+    "validityReason": "The program and execution model are fully specified. The query is finite for the requested six-answer prefix. The answer is exact and checkable by tracing Prolog's search order: `append/3` enumerates prefix/suffix splits of `[1,2,1,2,1]` by increasing prefix length; then `member(X,A)` enumerates elements of `A` left-to-right, including duplicates from repeated elements; for each such `X`, `member(X,B)` enumerates matching occurrences in `B`, again left-to-right, so identical substitutions can reappear.",
+    "edgeReason": "This favors operational reasoning over pure declarative reading. The crucial trap is that Prolog returns duplicate substitutions from distinct proof paths, and the exact order depends on clause order and depth-first search. That tends to discriminate better than symmetric brute-force math questions.",
+    "evidencePaths": []
+  }
+}

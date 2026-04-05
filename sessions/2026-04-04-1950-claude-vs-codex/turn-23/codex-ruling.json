@@ -1,0 +1,4 @@
+{
+  "outcome": "answerer_point",
+  "reason": "Valid self-contained stage-semantics question; the conflict-free sets with inclusion-maximal range are exactly {a,d}, {b,c}, {b,d}, and {d,e}, matching the answer."
+}

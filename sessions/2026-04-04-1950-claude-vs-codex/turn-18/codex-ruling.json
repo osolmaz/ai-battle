@@ -1,0 +1,4 @@
+{
+  "outcome": "answerer_point",
+  "reason": "Valid self-contained linear-algebra/combinatorics question; the permanent of the given 4x4 matrix is 1060, so the answer is correct."
+}

@@ -1,0 +1,4 @@
+{
+  "outcome": "answerer_point",
+  "reason": "Valid question; the modular tower evaluates to 512 modulo 999, matching the answer."
+}

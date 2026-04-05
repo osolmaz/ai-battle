@@ -1,0 +1,23 @@
+# AI Battle Manifest
+
+- Match ID: `2026-04-04-2146-claude-vs-codex`
+- Battle repo: `/home/bob/repos/ai-battle`
+- Scratch root: `/home/bob/ai-battle`
+- Participant A workspace: `/home/bob/ai-battle/2026-04-04-2146-claude-vs-codex/participant-a`
+- Participant B workspace: `/home/bob/ai-battle/2026-04-04-2146-claude-vs-codex/participant-b`
+- Judge workspace: `/home/bob/ai-battle/2026-04-04-2146-claude-vs-codex/judge`
+- Rules source: `/home/bob/repos/ai-battle/AGENTS.md`
+- Transcript: `/home/bob/repos/ai-battle/sessions/2026-04-04-2146-claude-vs-codex/transcript.md`
+- Message log: `/home/bob/repos/ai-battle/sessions/2026-04-04-2146-claude-vs-codex/messages.jsonl`
+- Participant A: `claude`
+- Participant B: `codex`
+- Judge: `codex`
+- Questions per participant: `10`
+- Sudden-death questions per participant: `3`
+- Standard turns: `20`
+- Sudden-death turns: `6`
+- Current phase: `standard match`
+- Latest completed turn: `20`
+- Next scheduled turn: `none`
+- Current score: `claude 9, codex 10`
+- Result if stopped now: `codex`

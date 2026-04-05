@@ -1,0 +1,4 @@
+{
+  "outcome": "answerer_point",
+  "reason": "Valid HM type-inference question; the given type is the principal type because the two uses of let-bound `b` can instantiate differently under let-polymorphism."
+}

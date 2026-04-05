@@ -1,0 +1,4 @@
+{
+  "outcome": "answerer_point",
+  "reason": "Valid lambda-calculus reduction question; the answer gives the correct 6 normal-order beta steps and reaches the normal form λy.y up to alpha-equivalence."
+}

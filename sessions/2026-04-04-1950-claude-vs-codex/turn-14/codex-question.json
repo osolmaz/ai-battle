@@ -1,0 +1,9 @@
+{
+  "publicQuestion": "Consider the simplicial complex K on vertices {1, 2, 3, 4, 5} whose maximal faces (facets) are:\n\n{1,2,3}, {1,3,4}, {2,3,5}, {2,4,5}, {1,4,5}\n\n(All subsets of these facets are also in K.) Compute the Betti numbers β₀, β₁, β₂ of K (with coefficients in Z or equivalently Q). Give your answer as the triple (β₀, β₁, β₂).",
+  "judgeNote": {
+    "intendedAnswer": "(β₀, β₁, β₂) = (1, 1, 0). The complex has 5 vertices, 10 edges (complete graph K₅ as 1-skeleton), and 5 triangular 2-faces. The boundary matrix ∂₂ has rank 5 (all 5 columns are linearly independent, since each column has a unique pivot row: e₁₂ for T₁, e₃₄ for T₂, e₃₅ for T₃, e₂₄ for T₄, e₁₅ for T₅). The boundary matrix ∂₁ has rank 4 (connected complex). So β₀ = 5-4 = 1, β₁ = 10-4-5 = 1, β₂ = 5-5 = 0. Euler characteristic: 1-1+0 = 0 = 5-10+5. Verified by code.",
+    "validityReason": "Well-defined simplicial complex with explicit facets. The Betti numbers are uniquely determined and can be computed via boundary matrices. Over Z the homology is torsion-free (verified: H₀ = Z, H₁ = Z, H₂ = 0).",
+    "edgeReason": "Computing Betti numbers requires: (1) enumerating all simplices (noting the 1-skeleton is the complete graph K₅ with 10 edges), (2) constructing the 10×5 boundary matrix ∂₂ with correct signs, and (3) computing its rank. The rank computation requires checking linear independence of 5 vectors in R¹⁰, where an error in any sign or entry propagates. The fact that all 10 possible edges are present (K₅ skeleton) but only 5 of 10 possible triangles is non-obvious and could lead to errors in enumeration. The answer β₁=1 is also mildly counterintuitive for a 2-dimensional complex.",
+    "evidencePaths": []
+  }
+}

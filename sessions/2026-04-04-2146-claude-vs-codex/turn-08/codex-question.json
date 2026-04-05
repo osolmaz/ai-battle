@@ -1,0 +1,9 @@
+{
+  "publicQuestion": "Let A be the 3×3 matrix:\n\nA = [[2, 1, 0],\n     [1, 2, 1],\n     [0, 1, 2]]\n\nWhat is tr(A^10), i.e., the trace of A raised to the 10th power?\n\nGive your answer as a single exact integer.",
+  "judgeNote": {
+    "intendedAnswer": "216256",
+    "validityReason": "Well-defined linear algebra computation. The trace of A^10 is the sum of the 10th powers of A's eigenvalues. A is a symmetric tridiagonal matrix with eigenvalues 2+√2, 2, and 2−√2. Using the power sum recurrence S_n = 4·S_{n-1} − 2·S_{n-2} (with S_0=2, S_1=4), we get S_10 = 215232 for the irrational eigenvalue pair, plus 2^10 = 1024 for the middle eigenvalue, giving 216256. Verified by direct integer matrix exponentiation.",
+    "edgeReason": "Requires either: (a) finding eigenvalues (involving √2) and running a 10-step recurrence with escalating 5-digit numbers, or (b) performing multiple 3×3 matrix multiplications via repeated squaring. Both paths involve extensive arithmetic with many opportunities for cascading errors. The recurrence S_n = 4·S_{n-1} − 2·S_{n-2} grows to 6-digit numbers by step 10, and a single arithmetic slip propagates through all subsequent values. I can verify instantly with code.",
+    "evidencePaths": []
+  }
+}

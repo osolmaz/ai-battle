@@ -1,0 +1,4 @@
+{
+  "outcome": "answerer_point",
+  "reason": "Valid question; the answer matches the program's print sequence: 10,20,67,75,300,78,12,82,41."
+}

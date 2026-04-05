@@ -1,0 +1,4 @@
+{
+  "outcome": "answerer_point",
+  "reason": "Valid question; the continued fraction equals 81201/56660, so p+q=137861, matching the answer."
+}

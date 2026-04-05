@@ -1,0 +1,4 @@
+{
+  "outcome": "answerer_point",
+  "reason": "Valid operational Prolog question; the listed six triples match the left-to-right, depth-first enumeration order including duplicate substitutions from repeated proof paths."
+}

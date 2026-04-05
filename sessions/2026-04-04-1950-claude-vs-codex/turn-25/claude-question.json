@@ -1,0 +1,9 @@
+{
+  "publicQuestion": "Work in Dung's abstract argumentation framework. The arguments are `{a, b, c, d, e, f}` and the attacks are:\n\n`a -> d`, `a -> e`, `b -> c`, `b -> d`, `c -> e`, `c -> f`, `d -> a`, `d -> b`, `e -> c`, `f -> b`.\n\nDefinitions:\n- `S` is conflict-free if no argument in `S` attacks another argument in `S`.\n- `S` defends an argument `x` if for every argument `y` attacking `x`, some argument in `S` attacks `y`.\n- `S` is admissible if it is conflict-free and defends every argument in `S`.\n- The range of `S` is `S ∪ S+`, where `S+` is the set of arguments attacked by some argument in `S`.\n- A semistable extension is an admissible set whose range is maximal by set inclusion among admissible sets.\n\nWhat are all semistable extensions?\n\nReturn them as a list of sets in lexicographic order, using `a < b < c < d < e < f`.",
+  "judgeNote": {
+    "intendedAnswer": "[{c,d}, {d,e,f}]",
+    "validityReason": "The framework and all needed notions are explicitly defined, so the question is self-contained and deterministic. The admissible sets are exactly `∅`, `{a}`, `{d}`, `{c,d}`, `{d,e}`, and `{d,e,f}`. Their ranges are respectively `∅`, `{a,d,e}`, `{a,b,d}`, `{a,b,c,d,e,f}`, `{a,b,c,d,e}`, and `{a,b,c,d,e,f}`. Hence the admissible sets with inclusion-maximal range are precisely `{c,d}` and `{d,e,f}`, so those are exactly the semistable extensions.",
+    "edgeReason": "This targets a niche abstract-argumentation semantics where a common mistake is to compute preferred or stable extensions instead of semistable ones. Here that trap is real: the semistable extensions are not obvious from the attack graph and require exact defense and range reasoning.",
+    "evidencePaths": []
+  }
+}

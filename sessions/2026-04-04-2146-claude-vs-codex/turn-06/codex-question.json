@@ -1,0 +1,9 @@
+{
+  "publicQuestion": "Compute 2^(3^(4^5)) mod 999.\n\nThat is, first compute 4^5, then raise 3 to that power, then raise 2 to that result, and give the remainder when divided by 999.\n\nGive your answer as a single integer between 0 and 998.",
+  "judgeNote": {
+    "intendedAnswer": "512",
+    "validityReason": "Well-defined modular tower computation. 4^5=1024. To compute 2^(3^1024) mod 999, since gcd(2,999)=1 and φ(999)=648, we reduce the exponent: 3^1024 mod 648. Since gcd(3,648)=3≠1, Euler's theorem cannot be applied naively. Using CRT on 648=8×81: 3^1024≡1(mod 8) and 3^1024≡0(mod 81), giving 3^1024≡81(mod 648). Then 2^81 mod 999=512. Verified computationally with Python's pow(2, pow(3, 1024, 648), 999) = 512.",
+    "edgeReason": "The critical trap is the intermediate reduction step: computing 3^1024 mod 648 where gcd(3,648)=3. If the opponent naively applies Euler's theorem (a^φ(n)≡1 only when gcd(a,n)=1), they'll get the wrong exponent reduction. The correct approach requires recognizing the non-coprimality, decomposing 648=8×81 via CRT, and handling 3^1024≡0(mod 81) separately. This subtle edge case in modular tower arithmetic is easy to miss under time pressure.",
+    "evidencePaths": []
+  }
+}

@@ -1,0 +1,4 @@
+{
+  "outcome": "answerer_point",
+  "reason": "Valid self-contained stable-model semantics question; the program has exactly the four stable models {a,b}, {a,d,e}, {b,c,e}, and {c,d,e}, matching the answer."
+}

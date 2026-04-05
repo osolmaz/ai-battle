@@ -1,0 +1,4 @@
+{
+  "outcome": "flawed_caught",
+  "reason": "The program has a lexical scoping error: `r` is referenced after its `let r = ... { ... }` block has ended, so the question is flawed and the answerer correctly identified it."
+}

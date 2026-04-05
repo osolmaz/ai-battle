@@ -1,0 +1,4 @@
+{
+  "outcome": "answerer_point",
+  "reason": "Valid self-contained Smith normal form question; the matrix has invariant factors 2, 2, and 8, so diag(2, 2, 8) is correct."
+}

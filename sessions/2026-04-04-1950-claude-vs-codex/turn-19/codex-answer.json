@@ -1,0 +1,5 @@
+{
+  "answer": "(True = {a, d}, False = {f}, Undefined = {b, c, e})",
+  "flawClaim": null,
+  "artifactPaths": []
+}

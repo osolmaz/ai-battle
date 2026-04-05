@@ -1,0 +1,4 @@
+{
+  "outcome": "answerer_point",
+  "reason": "Valid self-contained Prolog operational question; the answer correctly reflects left-to-right depth-first search with cut pruning only alternatives within each `r/2` call, yielding the listed ordered duplicates."
+}

@@ -1,0 +1,4 @@
+{
+  "outcome": "answerer_point",
+  "reason": "Valid self-contained mu-calculus fixed-point question; the formula evaluates to the least fixed point {s2, s4, s5}, so the answer is correct."
+}

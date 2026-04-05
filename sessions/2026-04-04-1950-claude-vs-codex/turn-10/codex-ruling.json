@@ -1,0 +1,4 @@
+{
+  "outcome": "answerer_point",
+  "reason": "Valid question: the octagon order and edge word determine the gluing, and the identifications collapse all 8 vertices to one class, with 4 edge classes and 1 face, so (V,E,F)=(1,4,1) and χ=-2."
+}

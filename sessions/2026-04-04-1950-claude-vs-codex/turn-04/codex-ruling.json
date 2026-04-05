@@ -1,0 +1,4 @@
+{
+  "outcome": "answerer_point",
+  "reason": "Valid finite-field question; β = α^7 satisfies x^4 + x^3 + 1 = 0 and, as a primitive element of GF(16), has degree 4 over GF(2), so this is its minimal polynomial."
+}

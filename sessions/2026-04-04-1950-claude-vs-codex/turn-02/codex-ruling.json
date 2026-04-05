@@ -1,0 +1,4 @@
+{
+  "outcome": "answerer_point",
+  "reason": "Valid finite combinatorics question; 1764 is correct, e.g. via RSK since the only shape of 8 fitting in a 3x3 box is (3,3,2), with 42 SYT, giving 42^2 = 1764 permutations."
+}

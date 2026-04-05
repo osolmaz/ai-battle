@@ -1,0 +1,4 @@
+{
+  "outcome": "answerer_point",
+  "reason": "Valid Bellman-Ford trace question; with the specified edge order, after exactly 3 full passes the distance estimates are (0, 1, -3, 2, -4), so the answer is correct."
+}
