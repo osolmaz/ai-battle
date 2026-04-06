@@ -110,10 +110,10 @@ function resolveAcpxRuntimeModulePath(): string {
 
 async function loadRuntimeModule(): Promise<RuntimeModule> {
   try {
-    return (await import("acpx/runtime")) as RuntimeModule;
-  } catch {
     const runtimeModulePath = resolveAcpxRuntimeModulePath();
     return (await import(pathToFileURL(runtimeModulePath).href)) as RuntimeModule;
+  } catch {
+    return (await import("acpx/runtime")) as RuntimeModule;
   }
 }
 
@@ -179,16 +179,14 @@ export function createAcpxBattleRuntime(options: {
     return handle;
   }
 
-  async function cancelPendingInformationalPrompt(sessionName: string): Promise<void> {
+  async function waitForPendingInformationalPrompt(sessionName: string): Promise<void> {
     const pending = pendingInformationalPrompts.get(sessionName);
     if (!pending) {
       return;
     }
 
-    pendingInformationalPrompts.delete(sessionName);
-    pending.controller.abort();
     await pending.completion.catch(() => {
-      // Best effort cleanup before the next real turn on this session.
+      // Best effort sequencing before the next prompt on this session.
     });
   }
 
@@ -203,12 +201,19 @@ export function createAcpxBattleRuntime(options: {
     let timedOut = false;
     let retryable = false;
     let abortedByCaller = false;
+    let abortedByTimeout = false;
 
     const runtime = await getRuntime();
     const handle = await ensureSession(options.target);
+    const turnController = new AbortController();
     const onCallerAbort = () => {
       abortedByCaller = true;
+      turnController.abort();
     };
+    const timeoutHandle = setTimeout(() => {
+      abortedByTimeout = true;
+      turnController.abort();
+    }, options.timeoutMs);
 
     if (options.signal) {
       if (options.signal.aborted) {
@@ -225,7 +230,7 @@ export function createAcpxBattleRuntime(options: {
         mode: "prompt",
         requestId: randomUUID(),
         timeoutMs: options.timeoutMs,
-        signal: options.signal,
+        signal: turnController.signal,
       })) {
         if (event.type === "text_delta" && event.stream !== "thought") {
           rawText += event.text;
@@ -237,15 +242,24 @@ export function createAcpxBattleRuntime(options: {
           retryable = retryable || event.retryable === true;
         }
       }
+    } catch (error) {
+      if (!abortedByCaller && !abortedByTimeout) {
+        throw error;
+      }
     } finally {
+      clearTimeout(timeoutHandle);
       options.signal?.removeEventListener("abort", onCallerAbort);
+    }
+
+    if (abortedByTimeout) {
+      timedOut = true;
     }
 
     if (timedOut && !errorMessage) {
       errorMessage = `timed out after ${Math.round(options.timeoutMs / 1000)} seconds`;
     }
 
-    if (abortedByCaller && !timedOut && !errorMessage) {
+    if (abortedByCaller && !abortedByTimeout && !timedOut && !errorMessage) {
       return {
         rawText: rawText.trim(),
         timedOut: false,
@@ -267,7 +281,7 @@ export function createAcpxBattleRuntime(options: {
     },
 
     async prompt(target, promptOptions) {
-      await cancelPendingInformationalPrompt(target.sessionName);
+      await waitForPendingInformationalPrompt(target.sessionName);
       return await consumePrompt({
         target,
         prompt: promptOptions.prompt,
@@ -276,7 +290,7 @@ export function createAcpxBattleRuntime(options: {
     },
 
     async queueNotice(target, promptOptions) {
-      await cancelPendingInformationalPrompt(target.sessionName);
+      await waitForPendingInformationalPrompt(target.sessionName);
       await ensureSession(target);
 
       const controller = new AbortController();
@@ -316,7 +330,6 @@ export function createAcpxBattleRuntime(options: {
     },
 
     async cancelPrompt(target, reason) {
-      await cancelPendingInformationalPrompt(target.sessionName);
       const runtime = await getRuntime();
       const handle = await ensureSession(target);
       await runtime.cancel({

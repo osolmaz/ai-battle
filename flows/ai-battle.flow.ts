@@ -1084,9 +1084,7 @@ async function sendParticipantInformationalPrompt(
   const sessionName = participantSessionNameForRole(state, role);
 
   await ensureAgentSession(profile, workspaceDir, sessionName);
-  await recordRunnerPrompt(state, role, promptType, prompt, turn, phase, {
-    expectReply: false,
-  });
+  await recordRunnerPrompt(state, role, promptType, prompt, turn, phase);
   const result = await runAgentPromptCommand({
     profile,
     workspaceDir,
@@ -1108,9 +1106,7 @@ async function sendJudgeInformationalPrompt(
   timeoutMs: number,
 ): Promise<void> {
   await ensureAgentSession(state.judgeProfile, state.judgeWorkspaceDir, state.judgeSessionName);
-  await recordRunnerPrompt(state, "judge", promptType, prompt, turn, phase, {
-    expectReply: false,
-  });
+  await recordRunnerPrompt(state, "judge", promptType, prompt, turn, phase);
   const result = await runAgentPromptCommand({
     profile: state.judgeProfile,
     workspaceDir: state.judgeWorkspaceDir,
@@ -2351,9 +2347,6 @@ async function recordRunnerPrompt(
   prompt: string,
   turn: number,
   phase: MatchPhase,
-  options?: {
-    expectReply?: boolean;
-  },
 ): Promise<void> {
   const eventId = nextTranscriptEventId(state, "prompt");
   await appendMessageEvent(
@@ -2367,10 +2360,6 @@ async function recordRunnerPrompt(
       body: prompt,
     }) as MatchMessageEvent,
   );
-
-  if (options?.expectReply === false) {
-    return;
-  }
 
   transcriptTrackerForTarget(state, target).pendingPrompts.push({
     promptEventId: eventId,
