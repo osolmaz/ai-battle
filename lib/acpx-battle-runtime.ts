@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { realpathSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -101,7 +102,7 @@ function resolveAcpxRuntimeModulePath(): string {
     throw new Error("Unable to resolve the acpx runtime module from process.argv[1].");
   }
 
-  const resolvedCliEntry = path.resolve(cliEntry);
+  const resolvedCliEntry = realpathSync(path.resolve(cliEntry));
   if (/\.(cts|mts|ts|tsx)$/i.test(resolvedCliEntry)) {
     return path.resolve(path.dirname(resolvedCliEntry), "runtime.ts");
   }
