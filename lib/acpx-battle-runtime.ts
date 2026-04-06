@@ -1,5 +1,9 @@
 import { randomUUID } from "node:crypto";
-import { join } from "node:path";
+import { existsSync } from "node:fs";
+import fs from "node:fs/promises";
+import { createRequire } from "node:module";
+import { pathToFileURL } from "node:url";
+import { dirname, join } from "node:path";
 
 type AcpRuntimeHandle = {
   sessionKey: string;
@@ -95,7 +99,73 @@ export type AcpxBattleRuntime = {
 };
 
 async function loadRuntimeModule(): Promise<RuntimeModule> {
-  return (await import("acpx/runtime")) as RuntimeModule;
+  const runtimeSpecifier =
+    resolveLocalRuntimeSpecifier() ?? (await resolveCliBundledRuntimeSpecifier());
+  if (!runtimeSpecifier) {
+    throw new Error(
+      "Unable to resolve the acpx runtime. Install acpx locally or run this flow through acpx itself.",
+    );
+  }
+
+  return (await import(runtimeSpecifier)) as RuntimeModule;
+}
+
+function resolveLocalRuntimeSpecifier(): string | null {
+  try {
+    const require = createRequire(import.meta.url);
+    return pathToFileURL(require.resolve("acpx/runtime")).href;
+  } catch {
+    return null;
+  }
+}
+
+async function resolveCliBundledRuntimeSpecifier(): Promise<string | null> {
+  const entrypoint = process.argv[1];
+  if (!entrypoint) {
+    return null;
+  }
+
+  const candidateDirs = new Set<string>();
+  candidateDirs.add(dirname(entrypoint));
+  candidateDirs.add(join(dirname(entrypoint), "..", "acpx"));
+
+  const realEntry = await fs.realpath(entrypoint).catch(() => null);
+  if (realEntry) {
+    candidateDirs.add(dirname(realEntry));
+  }
+
+  for (const candidateDir of candidateDirs) {
+    let currentDir = candidateDir;
+    while (true) {
+      const packageJsonPath = join(currentDir, "package.json");
+      if (existsSync(packageJsonPath)) {
+        try {
+          const packageJson = JSON.parse(await fs.readFile(packageJsonPath, "utf8")) as {
+            name?: string;
+          };
+          if (packageJson.name === "acpx") {
+            const runtimePath = join(currentDir, "dist", "runtime.js");
+            if (existsSync(runtimePath)) {
+              return pathToFileURL(runtimePath).href;
+            }
+            return null;
+          }
+        } catch {
+          // Keep walking upward if this package.json is unreadable.
+        }
+      }
+
+      const parentDir = join(currentDir, "..");
+      const normalizedParentDir = await fs.realpath(parentDir).catch(() => parentDir);
+      const normalizedCurrentDir = await fs.realpath(currentDir).catch(() => currentDir);
+      if (normalizedParentDir === normalizedCurrentDir) {
+        break;
+      }
+      currentDir = normalizedParentDir;
+    }
+  }
+
+  return null;
 }
 
 function sessionRecordPathForHandle(stateDir: string, handle: AcpRuntimeHandle): string {

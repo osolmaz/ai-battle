@@ -7,7 +7,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "acpx": "^0.4.1"
+    "acpx": "^0.5.0"
   },
   "devDependencies": {
     "@types/node": "^22.13.14",

@@ -130,7 +130,7 @@ turn-01/
 Run the flow from this repo root:
 
 ```bash
-acpx --approve-all flow run ./flows/ai-battle.flow.ts \
+npx -y acpx@latest --approve-all flow run ./flows/ai-battle.flow.ts \
   --input-json '{
     "participantA": { "profile": "codex", "label": "Codex" },
     "participantB": { "profile": "claude", "label": "Claude" },

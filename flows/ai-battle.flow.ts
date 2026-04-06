@@ -351,7 +351,6 @@ export default defineFlow({
   name: "ai-battle",
   permissions: {
     requiredMode: "approve-all",
-    requireExplicitGrant: true,
     reason:
       "This flow writes official match files into the battle repository and creates isolated scratch directories for the participants and judge.",
   },
