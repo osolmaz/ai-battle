@@ -1,7 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { realpathSync } from "node:fs";
-import path from "node:path";
-import { pathToFileURL } from "node:url";
+import { join } from "node:path";
 
 type AcpRuntimeHandle = {
   sessionKey: string;
@@ -96,31 +94,13 @@ export type AcpxBattleRuntime = {
   getSessionRecordPath(sessionName: string): string | undefined;
 };
 
-function resolveAcpxRuntimeModulePath(): string {
-  const cliEntry = process.argv[1];
-  if (!cliEntry) {
-    throw new Error("Unable to resolve the acpx runtime module from process.argv[1].");
-  }
-
-  const resolvedCliEntry = realpathSync(path.resolve(cliEntry));
-  if (/\.(cts|mts|ts|tsx)$/i.test(resolvedCliEntry)) {
-    return path.resolve(path.dirname(resolvedCliEntry), "runtime.ts");
-  }
-  return path.resolve(path.dirname(resolvedCliEntry), "runtime.js");
-}
-
 async function loadRuntimeModule(): Promise<RuntimeModule> {
-  try {
-    const runtimeModulePath = resolveAcpxRuntimeModulePath();
-    return (await import(pathToFileURL(runtimeModulePath).href)) as RuntimeModule;
-  } catch {
-    return (await import("acpx/runtime")) as RuntimeModule;
-  }
+  return (await import("acpx/runtime")) as RuntimeModule;
 }
 
 function sessionRecordPathForHandle(stateDir: string, handle: AcpRuntimeHandle): string {
   const recordId = handle.acpxRecordId ?? handle.sessionKey;
-  return path.join(stateDir, "sessions", `${encodeURIComponent(recordId)}.json`);
+  return join(stateDir, "sessions", `${encodeURIComponent(recordId)}.json`);
 }
 
 function summarizePromptRuntimeFailure(error: unknown): string {

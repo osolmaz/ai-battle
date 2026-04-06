@@ -583,13 +583,7 @@ export default defineFlow({
     }),
 
     finalize: compute({
-      run: ({ outputs }) => ({
-        matchDir: outputs.write_final_scoreboard.matchDir,
-        scoreboardPath: outputs.write_final_scoreboard.scoreboardPath,
-        scores: outputs.write_final_scoreboard.scores,
-        result: outputs.write_final_scoreboard.result,
-        history: outputs.write_final_scoreboard.history,
-      }),
+      run: ({ outputs }) => finalScoreboard(outputs),
     }),
   },
   edges: [
@@ -700,6 +694,12 @@ function writtenAnswer(outputs: Record<string, unknown>): WrittenAnswer {
 
 function writtenRuling(outputs: Record<string, unknown>): WrittenRuling {
   return outputs.select_ruling as WrittenRuling;
+}
+
+function finalScoreboard(
+  outputs: Record<string, unknown>,
+): Awaited<ReturnType<typeof writeFinalScoreboard>> {
+  return outputs.write_final_scoreboard as Awaited<ReturnType<typeof writeFinalScoreboard>>;
 }
 
 function askActionResult(raw: unknown): AskTurnActionResult {
