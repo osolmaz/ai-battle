@@ -1,9 +1,13 @@
-import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { action, compute, defineFlow, extractJsonObject } from "acpx/flows";
+import {
+  createAcpxBattleRuntime,
+  type AcpxBattleSessionTarget,
+  type AgentPromptResult,
+} from "../lib/acpx-battle-runtime.ts";
 import {
   buildAgentReplyEvent,
   buildRunnerNoticeEvent,
@@ -294,12 +298,9 @@ type StructuredPromptFailure = {
 };
 
 type StructuredPromptAttempt<T> = { ok: true; value: T } | StructuredPromptFailure;
-type StructuredPromptTarget = {
+type StructuredPromptTarget = AcpxBattleSessionTarget & {
   transcriptTarget: TranscriptTarget;
   displayName: string;
-  profile: string;
-  workspaceDir: string;
-  sessionName: string;
 };
 
 type StructuredPromptPhase = {
@@ -334,6 +335,17 @@ const JUDGE_TIMEOUT_MS = 20 * 60_000;
 const SHORT_ACK_TIMEOUT_MS = 10 * 60_000;
 const PARTICIPANT_ACTION_TIMEOUT_MS =
   PARTICIPANT_TURN_TIMEOUT_MS + PARTICIPANT_GRACE_TIMEOUT_MS + 120_000;
+const JUDGE_ACTION_TIMEOUT_MS = JUDGE_TIMEOUT_MS + PARTICIPANT_GRACE_TIMEOUT_MS + 60_000;
+const ACPX_STATE_DIR = path.join(os.homedir(), ".acpx");
+const battleRuntime = createAcpxBattleRuntime({
+  cwd: process.cwd(),
+  stateDir: ACPX_STATE_DIR,
+  onInformationalPromptFailure: ({ sessionName, errorMessage }) => {
+    process.stderr.write(
+      `[ai-battle] informational prompt failed for ${sessionName}: ${errorMessage}\n`,
+    );
+  },
+});
 
 export default defineFlow({
   name: "ai-battle",
@@ -571,13 +583,7 @@ export default defineFlow({
     }),
 
     finalize: compute({
-      run: ({ outputs }) => ({
-        matchDir: outputs.write_final_scoreboard.matchDir,
-        scoreboardPath: outputs.write_final_scoreboard.scoreboardPath,
-        scores: outputs.write_final_scoreboard.scores,
-        result: outputs.write_final_scoreboard.result,
-        history: outputs.write_final_scoreboard.history,
-      }),
+      run: ({ outputs }) => finalScoreboard(outputs),
     }),
   },
   edges: [
@@ -688,6 +694,12 @@ function writtenAnswer(outputs: Record<string, unknown>): WrittenAnswer {
 
 function writtenRuling(outputs: Record<string, unknown>): WrittenRuling {
   return outputs.select_ruling as WrittenRuling;
+}
+
+function finalScoreboard(
+  outputs: Record<string, unknown>,
+): Awaited<ReturnType<typeof writeFinalScoreboard>> {
+  return outputs.write_final_scoreboard as Awaited<ReturnType<typeof writeFinalScoreboard>>;
 }
 
 function askActionResult(raw: unknown): AskTurnActionResult {
@@ -1065,7 +1077,7 @@ async function sendParticipantInformationalPrompt(
   prompt: string,
   turn: number,
   phase: MatchPhase,
-  _timeoutMs: number,
+  timeoutMs: number,
 ): Promise<void> {
   const profile = participantProfileForRole(state, role);
   const workspaceDir = participantWorkspaceDirForRole(state, role);
@@ -1079,6 +1091,7 @@ async function sendParticipantInformationalPrompt(
     sessionName,
     prompt,
     noWait: true,
+    timeoutMs,
   });
   assertQueuedInformationalPrompt(result, `participant ${nameForRole(state, role)}`);
   await syncAllTranscriptSessions(state);
@@ -1090,7 +1103,7 @@ async function sendJudgeInformationalPrompt(
   prompt: string,
   turn: number,
   phase: MatchPhase,
-  _timeoutMs: number,
+  timeoutMs: number,
 ): Promise<void> {
   await ensureAgentSession(state.judgeProfile, state.judgeWorkspaceDir, state.judgeSessionName);
   await recordRunnerPrompt(state, "judge", promptType, prompt, turn, phase);
@@ -1100,6 +1113,7 @@ async function sendJudgeInformationalPrompt(
     sessionName: state.judgeSessionName,
     prompt,
     noWait: true,
+    timeoutMs,
   });
   assertQueuedInformationalPrompt(result, "judge");
   await syncAllTranscriptSessions(state);
@@ -1371,12 +1385,12 @@ async function cleanupStructuredPromptFailure(
 }
 
 function classifyStructuredPromptAttempt<T>(
-  result: CliCommandResult,
+  result: AgentPromptResult,
   normalize: (raw: unknown) => T,
 ): StructuredPromptAttempt<T> {
-  if (result.exitCode === 0) {
+  if (!result.errorMessage) {
     try {
-      const raw = extractJsonObject(result.stdout);
+      const raw = extractJsonObject(result.rawText);
       return {
         ok: true,
         value: normalize(raw),
@@ -1393,20 +1407,20 @@ function classifyStructuredPromptAttempt<T>(
     }
   }
 
-  if (isTimeoutCliResult(result)) {
+  if (result.timedOut) {
     return {
       ok: false,
       retryable: true,
       timedOut: true,
-      reason: `timed out after ${Math.round(result.timeoutMs / 1000)} seconds`,
+      reason: result.errorMessage,
     };
   }
 
   return {
     ok: false,
-    retryable: false,
+    retryable: result.retryable,
     timedOut: false,
-    reason: describeCliFailure(result),
+    reason: result.errorMessage,
   };
 }
 
@@ -1415,24 +1429,11 @@ async function ensureAgentSession(
   workspaceDir: string,
   sessionName: string,
 ): Promise<void> {
-  const result = await runAcpxCommand({
-    args: [
-      "--approve-all",
-      "--format",
-      "quiet",
-      "--cwd",
-      workspaceDir,
-      ...buildAcpxAgentArgs(profile),
-      "sessions",
-      "ensure",
-      "--name",
-      sessionName,
-    ],
-    cwd: workspaceDir,
+  await battleRuntime.ensureSession({
+    profile,
+    workspaceDir,
+    sessionName,
   });
-  if (result.exitCode !== 0) {
-    throw new Error(`Failed to ensure participant session: ${describeCliFailure(result)}`);
-  }
 }
 
 async function cancelAgentPrompt(
@@ -1440,28 +1441,14 @@ async function cancelAgentPrompt(
   workspaceDir: string,
   sessionName: string,
 ): Promise<void> {
-  const result = await runAcpxCommand({
-    args: [
-      "--approve-all",
-      "--format",
-      "quiet",
-      "--cwd",
+  await battleRuntime.cancelPrompt(
+    {
+      profile,
       workspaceDir,
-      ...buildAcpxAgentArgs(profile),
-      "cancel",
-      "-s",
       sessionName,
-    ],
-    cwd: workspaceDir,
-  });
-
-  if (
-    result.exitCode !== 0 &&
-    !/nothing to cancel/i.test(result.stdout) &&
-    !/nothing to cancel/i.test(result.stderr)
-  ) {
-    throw new Error(`Failed to cancel participant prompt: ${describeCliFailure(result)}`);
-  }
+    },
+    "ai-battle retry cleanup",
+  );
 }
 
 async function runAgentPromptCommand(options: {
@@ -1471,166 +1458,43 @@ async function runAgentPromptCommand(options: {
   prompt: string;
   timeoutMs?: number;
   noWait?: boolean;
-}): Promise<CliCommandResult> {
-  return await runAcpxCommand({
-    args: [
-      "--approve-all",
-      "--format",
-      "quiet",
-      ...(options.timeoutMs ? ["--timeout", String(Math.ceil(options.timeoutMs / 1000))] : []),
-      "--cwd",
-      options.workspaceDir,
-      ...buildAcpxAgentArgs(options.profile),
-      "prompt",
-      ...(options.noWait ? ["--no-wait"] : []),
-      "-s",
-      options.sessionName,
-      "-f",
-      "-",
-    ],
-    cwd: options.workspaceDir,
-    stdin: options.prompt,
-    timeoutMs: options.timeoutMs ? options.timeoutMs + 15_000 : 15_000,
-  });
-}
-
-function buildAcpxAgentArgs(profile: string): string[] {
-  const trimmed = profile.trim();
-  if (/^[A-Za-z0-9][A-Za-z0-9_-]*$/u.test(trimmed)) {
-    return [trimmed];
-  }
-  return ["--agent", trimmed];
-}
-
-type CliCommandResult = {
-  stdout: string;
-  stderr: string;
-  exitCode: number | null;
-  signal: NodeJS.Signals | null;
-  timeoutMs: number;
-};
-
-async function runAcpxCommand(options: {
-  args: string[];
-  cwd: string;
-  stdin?: string;
-  timeoutMs?: number;
-}): Promise<CliCommandResult> {
-  const invocation = resolveAcpxCliInvocation();
-
-  return await new Promise<CliCommandResult>((resolve, reject) => {
-    const child = spawn(invocation.command, [...invocation.baseArgs, ...options.args], {
-      cwd: options.cwd,
-      env: process.env,
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-
-    const stdoutChunks: string[] = [];
-    const stderrChunks: string[] = [];
-    let settled = false;
-    let timer: NodeJS.Timeout | undefined;
-
-    const finish = (result: CliCommandResult) => {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      if (timer) {
-        clearTimeout(timer);
-      }
-      resolve(result);
-    };
-
-    child.stdout.on("data", (chunk: Buffer | string) => {
-      stdoutChunks.push(String(chunk));
-    });
-    child.stderr.on("data", (chunk: Buffer | string) => {
-      stderrChunks.push(String(chunk));
-    });
-    child.on("error", (error) => {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      if (timer) {
-        clearTimeout(timer);
-      }
-      reject(error);
-    });
-    child.on("close", (exitCode, signal) => {
-      finish({
-        stdout: stdoutChunks.join("").trim(),
-        stderr: stderrChunks.join("").trim(),
-        exitCode,
-        signal,
-        timeoutMs: options.timeoutMs ?? 0,
-      });
-    });
-
-    if (options.timeoutMs && options.timeoutMs > 0) {
-      timer = setTimeout(() => {
-        void child.kill("SIGTERM");
-      }, options.timeoutMs);
-    }
-
-    if (options.stdin) {
-      child.stdin.end(options.stdin);
-    } else {
-      child.stdin.end();
-    }
-  });
-}
-
-function resolveAcpxCliInvocation(): {
-  command: string;
-  baseArgs: string[];
-} {
-  const cliEntry = process.argv[1];
-  if (!cliEntry) {
-    throw new Error("Unable to resolve the acpx CLI entrypoint from process.argv[1].");
-  }
-  if (/\.(cts|mts|ts|tsx)$/i.test(cliEntry)) {
-    const tsxPath = path.resolve(path.dirname(cliEntry), "..", "node_modules", ".bin", "tsx");
-    if (!existsSync(tsxPath)) {
-      throw new Error(`Unable to find tsx next to source acpx CLI: ${tsxPath}`);
-    }
-    return {
-      command: tsxPath,
-      baseArgs: [cliEntry],
-    };
-  }
-  return {
-    command: process.execPath,
-    baseArgs: [cliEntry],
+}): Promise<AgentPromptResult> {
+  const timeoutMs =
+    options.timeoutMs ?? (options.noWait ? SHORT_ACK_TIMEOUT_MS : PARTICIPANT_TURN_TIMEOUT_MS);
+  const target: AcpxBattleSessionTarget = {
+    profile: options.profile,
+    workspaceDir: options.workspaceDir,
+    sessionName: options.sessionName,
   };
+
+  if (options.noWait) {
+    await battleRuntime.queueNotice(target, {
+      prompt: options.prompt,
+      timeoutMs,
+    });
+    return {
+      rawText: "",
+      timedOut: false,
+      retryable: false,
+    };
+  }
+
+  return await battleRuntime.prompt(target, {
+    prompt: options.prompt,
+    timeoutMs,
+  });
 }
 
-function isTimeoutCliResult(result: CliCommandResult): boolean {
-  return (
-    result.exitCode === 3 ||
-    /Timed out after/i.test(result.stderr) ||
-    /Timed out after/i.test(result.stdout)
-  );
+function describePromptFailure(result: AgentPromptResult): string {
+  return result.errorMessage ?? "unknown prompt failure";
 }
 
-function describeCliFailure(result: CliCommandResult): string {
-  const parts = [
-    result.exitCode == null ? "process exited without code" : `exit code ${result.exitCode}`,
-    ...(result.signal ? [`signal ${result.signal}`] : []),
-    ...(result.stderr ? [`stderr: ${result.stderr}`] : []),
-    ...(result.stdout ? [`stdout: ${result.stdout}`] : []),
-  ];
-  return parts.join(", ");
-}
-
-function assertQueuedInformationalPrompt(result: CliCommandResult, label: string): void {
-  if (result.exitCode === 0) {
+function assertQueuedInformationalPrompt(result: AgentPromptResult, label: string): void {
+  if (!result.errorMessage) {
     return;
   }
 
-  throw new Error(
-    `Failed to queue informational prompt for ${label}: ${describeCliFailure(result)}`,
-  );
+  throw new Error(`Failed to queue informational prompt for ${label}: ${describePromptFailure(result)}`);
 }
 
 function asObject(value: unknown): Record<string, unknown> | null {
@@ -2449,7 +2313,7 @@ function transcriptSpeakerNameForTarget(state: MatchState, target: TranscriptTar
 
 function transcriptSpeakerRoleForTarget(
   target: TranscriptTarget,
-): "participant" | "judge" | "runner" {
+): "participant" | "judge" {
   return target === "judge" ? "judge" : "participant";
 }
 
@@ -2597,6 +2461,13 @@ async function resolveSessionRecordPathForTarget(
     return tracker.sessionRecordPath;
   }
 
+  const sessionName = sessionNameForTranscriptTarget(state, target);
+  const runtimePath = battleRuntime.getSessionRecordPath(sessionName);
+  if (runtimePath && existsSync(runtimePath)) {
+    tracker.sessionRecordPath = runtimePath;
+    return runtimePath;
+  }
+
   const sessionsDir = path.join(os.homedir(), ".acpx", "sessions");
   let entries: string[];
   try {
@@ -2605,7 +2476,6 @@ async function resolveSessionRecordPathForTarget(
     return undefined;
   }
 
-  const sessionName = sessionNameForTranscriptTarget(state, target);
   let bestPath: string | undefined;
   let bestLastUsedAt = "";
 
@@ -3125,9 +2995,12 @@ function renderRulingFile(
     askerDelta,
     answererDelta,
     rulingPath: "",
+    rulingJsonPath: "",
     questionPath: turn.questionPath,
+    questionJsonPath: turn.questionJsonPath,
     judgeNotePath: turn.judgeNotePath,
     answerPath: turn.answerPath,
+    answerJsonPath: turn.answerJsonPath,
   });
 
   return [
