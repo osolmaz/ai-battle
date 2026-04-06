@@ -1,10 +1,13 @@
-import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
 import { action, compute, defineFlow, extractJsonObject } from "acpx/flows";
+import {
+  createAcpxBattleRuntime,
+  type AcpxBattleSessionTarget,
+  type AgentPromptResult,
+} from "../lib/acpx-battle-runtime.ts";
 import {
   buildAgentReplyEvent,
   buildRunnerNoticeEvent,
@@ -295,14 +298,9 @@ type StructuredPromptFailure = {
 };
 
 type StructuredPromptAttempt<T> = { ok: true; value: T } | StructuredPromptFailure;
-type RuntimeSessionGroup = "participant" | "judge";
-type StructuredPromptTarget = {
+type StructuredPromptTarget = AcpxBattleSessionTarget & {
   transcriptTarget: TranscriptTarget;
   displayName: string;
-  runtimeGroup: RuntimeSessionGroup;
-  profile: string;
-  workspaceDir: string;
-  sessionName: string;
 };
 
 type StructuredPromptPhase = {
@@ -329,70 +327,6 @@ type StructuredPromptRunFailure = {
 };
 
 type StructuredPromptRunResult<T> = { ok: true; value: T } | StructuredPromptRunFailure;
-type AcpRuntimeHandle = {
-  sessionKey: string;
-  backend: string;
-  runtimeSessionName: string;
-  cwd?: string;
-  acpxRecordId?: string;
-  backendSessionId?: string;
-  agentSessionId?: string;
-};
-
-type AcpRuntimeEvent =
-  | {
-      type: "text_delta";
-      text: string;
-      stream?: "output" | "thought";
-    }
-  | {
-      type: "done";
-      stopReason?: string;
-    }
-  | {
-      type: "error";
-      message: string;
-      code?: string;
-      retryable?: boolean;
-    }
-  | {
-      type: "status" | "tool_call";
-      text: string;
-    };
-
-type AcpRuntime = {
-  ensureSession(input: {
-    sessionKey: string;
-    agent: string;
-    mode: "persistent" | "oneshot";
-    cwd?: string;
-  }): Promise<AcpRuntimeHandle>;
-  runTurn(input: {
-    handle: AcpRuntimeHandle;
-    text: string;
-    mode: "prompt" | "steer";
-    requestId: string;
-    signal?: AbortSignal;
-  }): AsyncIterable<AcpRuntimeEvent>;
-  cancel(input: { handle: AcpRuntimeHandle; reason?: string }): Promise<void>;
-};
-
-type AgentPromptResult = {
-  rawText: string;
-  timedOut: boolean;
-  retryable: boolean;
-  errorMessage?: string;
-};
-
-type PendingInformationalPrompt = {
-  controller: AbortController;
-  completion: Promise<void>;
-};
-
-type RuntimeSessionHandle = {
-  group: RuntimeSessionGroup;
-  handle: AcpRuntimeHandle;
-};
 
 const PARTICIPANT_TURN_TIMEOUT_MS = 30 * 60_000;
 const PARTICIPANT_GRACE_TIMEOUT_MS = 60_000;
@@ -403,10 +337,15 @@ const PARTICIPANT_ACTION_TIMEOUT_MS =
   PARTICIPANT_TURN_TIMEOUT_MS + PARTICIPANT_GRACE_TIMEOUT_MS + 120_000;
 const JUDGE_ACTION_TIMEOUT_MS = JUDGE_TIMEOUT_MS + PARTICIPANT_GRACE_TIMEOUT_MS + 60_000;
 const ACPX_STATE_DIR = path.join(os.homedir(), ".acpx");
-const runtimeByGroup = new Map<RuntimeSessionGroup, Promise<AcpRuntime>>();
-const runtimeSessionHandles = new Map<string, RuntimeSessionHandle>();
-const runtimeSessionRecordPaths = new Map<string, string>();
-const pendingInformationalPrompts = new Map<string, PendingInformationalPrompt>();
+const battleRuntime = createAcpxBattleRuntime({
+  cwd: process.cwd(),
+  stateDir: ACPX_STATE_DIR,
+  onInformationalPromptFailure: ({ sessionName, errorMessage }) => {
+    process.stderr.write(
+      `[ai-battle] informational prompt failed for ${sessionName}: ${errorMessage}\n`,
+    );
+  },
+});
 
 export default defineFlow({
   name: "ai-battle",
@@ -1144,13 +1083,12 @@ async function sendParticipantInformationalPrompt(
   const workspaceDir = participantWorkspaceDirForRole(state, role);
   const sessionName = participantSessionNameForRole(state, role);
 
-  await ensureAgentSession(profile, workspaceDir, sessionName, "participant");
+  await ensureAgentSession(profile, workspaceDir, sessionName);
   await recordRunnerPrompt(state, role, promptType, prompt, turn, phase);
   const result = await runAgentPromptCommand({
     profile,
     workspaceDir,
     sessionName,
-    runtimeGroup: "participant",
     prompt,
     noWait: true,
     timeoutMs,
@@ -1167,18 +1105,12 @@ async function sendJudgeInformationalPrompt(
   phase: MatchPhase,
   timeoutMs: number,
 ): Promise<void> {
-  await ensureAgentSession(
-    state.judgeProfile,
-    state.judgeWorkspaceDir,
-    state.judgeSessionName,
-    "judge",
-  );
+  await ensureAgentSession(state.judgeProfile, state.judgeWorkspaceDir, state.judgeSessionName);
   await recordRunnerPrompt(state, "judge", promptType, prompt, turn, phase);
   const result = await runAgentPromptCommand({
     profile: state.judgeProfile,
     workspaceDir: state.judgeWorkspaceDir,
     sessionName: state.judgeSessionName,
-    runtimeGroup: "judge",
     prompt,
     noWait: true,
     timeoutMs,
@@ -1203,7 +1135,6 @@ async function sendParticipantStructuredPrompt<T>(
     target: {
       transcriptTarget: role,
       displayName: participantName,
-      runtimeGroup: "participant",
       profile: participantProfileForRole(state, role),
       workspaceDir: participantWorkspaceDirForRole(state, role),
       sessionName: participantSessionNameForRole(state, role),
@@ -1268,7 +1199,6 @@ async function sendJudgeStructuredPrompt<T>(
     target: {
       transcriptTarget: "judge",
       displayName: "Judge",
-      runtimeGroup: "judge",
       profile: state.judgeProfile,
       workspaceDir: state.judgeWorkspaceDir,
       sessionName: state.judgeSessionName,
@@ -1324,7 +1254,6 @@ async function runStructuredPromptWithRetries<T>(options: {
     options.target.profile,
     options.target.workspaceDir,
     options.target.sessionName,
-    options.target.runtimeGroup,
   );
 
   const mainAttempt = await runStructuredPromptPhase({
@@ -1431,7 +1360,6 @@ async function runStructuredPromptPhase<T>(options: {
     profile: options.target.profile,
     workspaceDir: options.target.workspaceDir,
     sessionName: options.target.sessionName,
-    runtimeGroup: options.target.runtimeGroup,
     prompt: options.prompt,
     timeoutMs: options.timeoutMs,
   });
@@ -1446,12 +1374,7 @@ async function cleanupStructuredPromptFailure(
   failure: StructuredPromptFailure,
 ): Promise<void> {
   if (failure.timedOut) {
-    await cancelAgentPrompt(
-      target.profile,
-      target.workspaceDir,
-      target.sessionName,
-      target.runtimeGroup,
-    );
+    await cancelAgentPrompt(target.profile, target.workspaceDir, target.sessionName);
   }
   dropPendingTranscriptPrompt(
     state,
@@ -1501,266 +1424,51 @@ function classifyStructuredPromptAttempt<T>(
   };
 }
 
-function resolveAcpxRuntimeModulePath(): string {
-  const cliEntry = process.argv[1];
-  if (!cliEntry) {
-    throw new Error("Unable to resolve the acpx runtime module from process.argv[1].");
-  }
-
-  const resolvedCliEntry = path.resolve(cliEntry);
-  if (/\.(cts|mts|ts|tsx)$/i.test(resolvedCliEntry)) {
-    return path.resolve(path.dirname(resolvedCliEntry), "runtime.ts");
-  }
-  return path.resolve(path.dirname(resolvedCliEntry), "runtime.js");
-}
-
-function runtimeTimeoutForGroup(group: RuntimeSessionGroup): number {
-  return group === "participant" ? PARTICIPANT_ACTION_TIMEOUT_MS : JUDGE_ACTION_TIMEOUT_MS;
-}
-
-async function getAcpxRuntime(group: RuntimeSessionGroup): Promise<AcpRuntime> {
-  const cached = runtimeByGroup.get(group);
-  if (cached) {
-    return await cached;
-  }
-
-  const runtimePromise = (async () => {
-    const runtimeModulePath = resolveAcpxRuntimeModulePath();
-    const runtimeModule = (await import(pathToFileURL(runtimeModulePath).href)) as {
-      createAcpRuntime: (options: {
-        cwd: string;
-        sessionStore: unknown;
-        agentRegistry: unknown;
-        permissionMode: "approve-all";
-        timeoutMs: number;
-      }) => AcpRuntime;
-      createAgentRegistry: () => unknown;
-      createRuntimeStore: (options: { stateDir: string }) => unknown;
-    };
-
-    return runtimeModule.createAcpRuntime({
-      cwd: process.cwd(),
-      sessionStore: runtimeModule.createRuntimeStore({ stateDir: ACPX_STATE_DIR }),
-      agentRegistry: runtimeModule.createAgentRegistry(),
-      permissionMode: "approve-all",
-      timeoutMs: runtimeTimeoutForGroup(group),
-    });
-  })();
-
-  runtimeByGroup.set(group, runtimePromise);
-  try {
-    return await runtimePromise;
-  } catch (error) {
-    runtimeByGroup.delete(group);
-    throw error;
-  }
-}
-
-function sessionRecordPathForHandle(handle: AcpRuntimeHandle): string {
-  const recordId = handle.acpxRecordId ?? handle.sessionKey;
-  return path.join(ACPX_STATE_DIR, "sessions", `${encodeURIComponent(recordId)}.json`);
-}
-
 async function ensureAgentSession(
   profile: string,
   workspaceDir: string,
   sessionName: string,
-  runtimeGroup: RuntimeSessionGroup,
-): Promise<AcpRuntimeHandle> {
-  const cached = runtimeSessionHandles.get(sessionName);
-  if (cached) {
-    return cached.handle;
-  }
-
-  const runtime = await getAcpxRuntime(runtimeGroup);
-  const handle = await runtime.ensureSession({
-    sessionKey: sessionName,
-    agent: profile,
-    mode: "persistent",
-    cwd: workspaceDir,
+): Promise<void> {
+  await battleRuntime.ensureSession({
+    profile,
+    workspaceDir,
+    sessionName,
   });
-  runtimeSessionHandles.set(sessionName, {
-    group: runtimeGroup,
-    handle,
-  });
-  runtimeSessionRecordPaths.set(sessionName, sessionRecordPathForHandle(handle));
-  return handle;
-}
-
-async function cancelPendingInformationalPrompt(sessionName: string): Promise<void> {
-  const pending = pendingInformationalPrompts.get(sessionName);
-  if (!pending) {
-    return;
-  }
-
-  pendingInformationalPrompts.delete(sessionName);
-  pending.controller.abort();
-  await pending.completion.catch(() => {
-    // Best effort cleanup before the next real turn on this session.
-  });
-}
-
-function summarizePromptRuntimeFailure(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 async function cancelAgentPrompt(
   profile: string,
   workspaceDir: string,
   sessionName: string,
-  runtimeGroup: RuntimeSessionGroup,
 ): Promise<void> {
-  await cancelPendingInformationalPrompt(sessionName);
-  const handle = await ensureAgentSession(profile, workspaceDir, sessionName, runtimeGroup);
-  const runtime = await getAcpxRuntime(runtimeGroup);
-  await runtime.cancel({
-    handle,
-    reason: "ai-battle retry cleanup",
-  });
-}
-
-async function consumePromptEvents(options: {
-  handle: AcpRuntimeHandle;
-  prompt: string;
-  runtimeGroup: RuntimeSessionGroup;
-  timeoutMs: number;
-  signal?: AbortSignal;
-}): Promise<AgentPromptResult> {
-  let rawText = "";
-  let errorMessage: string | undefined;
-  let timedOut = false;
-  let retryable = false;
-  let abortedByCaller = false;
-  const runtime = await getAcpxRuntime(options.runtimeGroup);
-  const controller = new AbortController();
-  const timeoutHandle = setTimeout(() => {
-    timedOut = true;
-    retryable = true;
-    controller.abort();
-  }, options.timeoutMs);
-  const onCallerAbort = () => {
-    abortedByCaller = true;
-    controller.abort();
-  };
-
-  if (options.signal) {
-    if (options.signal.aborted) {
-      onCallerAbort();
-    } else {
-      options.signal.addEventListener("abort", onCallerAbort, { once: true });
-    }
-  }
-
-  try {
-    for await (const event of runtime.runTurn({
-      handle: options.handle,
-      text: options.prompt,
-      mode: "prompt",
-      requestId: randomUUID(),
-      signal: controller.signal,
-    })) {
-      if (event.type === "text_delta" && event.stream !== "thought") {
-        rawText += event.text;
-        continue;
-      }
-      if (event.type === "error") {
-        errorMessage = event.message;
-        timedOut = timedOut || event.code === "TIMEOUT";
-        retryable = retryable || event.retryable === true;
-      }
-    }
-  } finally {
-    clearTimeout(timeoutHandle);
-    options.signal?.removeEventListener("abort", onCallerAbort);
-  }
-
-  if (timedOut && !errorMessage) {
-    errorMessage = `timed out after ${Math.round(options.timeoutMs / 1000)} seconds`;
-  }
-
-  if (abortedByCaller && !timedOut && !errorMessage) {
-    return {
-      rawText: rawText.trim(),
-      timedOut: false,
-      retryable: false,
-    };
-  }
-
-  return {
-    rawText: rawText.trim(),
-    timedOut,
-    retryable,
-    errorMessage,
-  };
-}
-
-async function startBackgroundInformationalPrompt(options: {
-  handle: AcpRuntimeHandle;
-  runtimeGroup: RuntimeSessionGroup;
-  sessionName: string;
-  prompt: string;
-  timeoutMs: number;
-}): Promise<void> {
-  await cancelPendingInformationalPrompt(options.sessionName);
-
-  const controller = new AbortController();
-  const completion = (async () => {
-    try {
-      const result = await consumePromptEvents({
-        handle: options.handle,
-        prompt: options.prompt,
-        runtimeGroup: options.runtimeGroup,
-        timeoutMs: options.timeoutMs,
-        signal: controller.signal,
-      });
-      if (result.errorMessage && !controller.signal.aborted) {
-        process.stderr.write(
-          `[ai-battle] informational prompt failed for ${options.sessionName}: ${result.errorMessage}\n`,
-        );
-      }
-    } catch (error) {
-      if (!controller.signal.aborted) {
-        process.stderr.write(
-          `[ai-battle] informational prompt crashed for ${options.sessionName}: ${summarizePromptRuntimeFailure(error)}\n`,
-        );
-      }
-    } finally {
-      const pending = pendingInformationalPrompts.get(options.sessionName);
-      if (pending?.completion === completion) {
-        pendingInformationalPrompts.delete(options.sessionName);
-      }
-    }
-  })();
-
-  pendingInformationalPrompts.set(options.sessionName, {
-    controller,
-    completion,
-  });
+  await battleRuntime.cancelPrompt(
+    {
+      profile,
+      workspaceDir,
+      sessionName,
+    },
+    "ai-battle retry cleanup",
+  );
 }
 
 async function runAgentPromptCommand(options: {
   profile: string;
   workspaceDir: string;
   sessionName: string;
-  runtimeGroup: RuntimeSessionGroup;
   prompt: string;
   timeoutMs?: number;
   noWait?: boolean;
 }): Promise<AgentPromptResult> {
   const timeoutMs =
     options.timeoutMs ?? (options.noWait ? SHORT_ACK_TIMEOUT_MS : PARTICIPANT_TURN_TIMEOUT_MS);
-  const handle = await ensureAgentSession(
-    options.profile,
-    options.workspaceDir,
-    options.sessionName,
-    options.runtimeGroup,
-  );
+  const target: AcpxBattleSessionTarget = {
+    profile: options.profile,
+    workspaceDir: options.workspaceDir,
+    sessionName: options.sessionName,
+  };
 
   if (options.noWait) {
-    await startBackgroundInformationalPrompt({
-      handle,
-      runtimeGroup: options.runtimeGroup,
-      sessionName: options.sessionName,
+    await battleRuntime.queueNotice(target, {
       prompt: options.prompt,
       timeoutMs,
     });
@@ -1771,11 +1479,8 @@ async function runAgentPromptCommand(options: {
     };
   }
 
-  await cancelPendingInformationalPrompt(options.sessionName);
-  return await consumePromptEvents({
-    handle,
+  return await battleRuntime.prompt(target, {
     prompt: options.prompt,
-    runtimeGroup: options.runtimeGroup,
     timeoutMs,
   });
 }
@@ -2757,7 +2462,7 @@ async function resolveSessionRecordPathForTarget(
   }
 
   const sessionName = sessionNameForTranscriptTarget(state, target);
-  const runtimePath = runtimeSessionRecordPaths.get(sessionName);
+  const runtimePath = battleRuntime.getSessionRecordPath(sessionName);
   if (runtimePath && existsSync(runtimePath)) {
     tracker.sessionRecordPath = runtimePath;
     return runtimePath;
