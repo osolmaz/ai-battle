@@ -2317,7 +2317,7 @@ function transcriptSpeakerNameForTarget(state: MatchState, target: TranscriptTar
 
 function transcriptSpeakerRoleForTarget(
   target: TranscriptTarget,
-): "participant" | "judge" | "runner" {
+): "participant" | "judge" {
   return target === "judge" ? "judge" : "participant";
 }
 
@@ -3006,9 +3006,12 @@ function renderRulingFile(
     askerDelta,
     answererDelta,
     rulingPath: "",
+    rulingJsonPath: "",
     questionPath: turn.questionPath,
+    questionJsonPath: turn.questionJsonPath,
     judgeNotePath: turn.judgeNotePath,
     answerPath: turn.answerPath,
+    answerJsonPath: turn.answerJsonPath,
   });
 
   return [
